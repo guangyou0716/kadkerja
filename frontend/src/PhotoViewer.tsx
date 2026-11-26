@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { PhotoImage } from './PhotoImage'
 import { secondaryButtonClass } from './components'
+import { useI18n } from './i18n/context'
 
 /** One photo large, over the page. Escape or Close returns to where you were. */
 export function PhotoViewer({
@@ -16,6 +17,7 @@ export function PhotoViewer({
   onClose: () => void
   children?: ReactNode
 }) {
+  const { t } = useI18n()
   const close = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null
@@ -41,7 +43,7 @@ export function PhotoViewer({
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold text-slate-900">{title}</h2>
           <button ref={close} type="button" className={secondaryButtonClass} onClick={onClose}>
-            Close
+            {t('common.close')}
           </button>
         </div>
         <PhotoImage url={url} alt={caption ?? title} className="max-h-[70vh] w-full rounded object-contain" />

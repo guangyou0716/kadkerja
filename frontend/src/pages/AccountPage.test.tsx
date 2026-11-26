@@ -35,7 +35,7 @@ describe('My password', () => {
     expect(screen.getByRole('link', { name: 'My password' })).toHaveAttribute('aria-current', 'page')
 
     await fill(user, 'my old password', 'new passphrase 1', 'new passphrase 2')
-    expect(screen.getByText('the two new passwords are not the same')).toBeInTheDocument()
+    expect(screen.getByText('The two new passwords are not the same.')).toBeInTheDocument()
     expect(passwordCalls(api)).toHaveLength(0)
 
     await fill(user, 'not my password', 'new passphrase 1', 'new passphrase 1')

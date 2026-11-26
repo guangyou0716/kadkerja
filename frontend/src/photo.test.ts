@@ -6,10 +6,10 @@ describe('photo checks', () => {
     expect(photoProblem(new File(['x'], 'a.jpg', { type: 'image/jpeg' }))).toBeNull()
     expect(photoProblem(new File(['x'], 'a.png', { type: 'image/png' }))).toBeNull()
     for (const type of ['image/gif', 'image/svg+xml', 'image/heic', 'text/html', '']) {
-      expect(photoProblem(new File(['x'], 'a', { type }))).toBe('Use a JPEG or PNG photo.')
+      expect(photoProblem(new File(['x'], 'a', { type }))).toBe('photos.wrongType')
     }
     const big = new File([new Uint8Array(25 * 1024 * 1024 + 1)], 'big.jpg', { type: 'image/jpeg' })
-    expect(photoProblem(big)).toMatch(/too big/)
+    expect(photoProblem(big)).toBe('photos.tooBigPicked')
   })
 
   it('sends the file as it is where the browser cannot shrink it (the server shrinks it then)', async () => {

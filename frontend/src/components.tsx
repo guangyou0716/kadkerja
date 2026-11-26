@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react'
-import { STATUS_BADGE, STATUS_LABEL, type JobStatus } from './status'
+import { useId, type ReactNode } from 'react'
+import { useI18n } from './i18n/context'
+import { STATUS_BADGE, STATUS_KEY, type JobStatus } from './status'
 
 export function StatusBadge({ status }: { status: JobStatus }) {
+  const { t } = useI18n()
   return (
     <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[status]}`}>
-      {STATUS_LABEL[status]}
+      {t(STATUS_KEY[status])}
     </span>
   )
 }
@@ -28,7 +30,8 @@ export function Field({
   hint?: string
   children: (props: { id: string; 'aria-invalid': boolean; 'aria-describedby'?: string }) => ReactNode
 }) {
-  const id = `f-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  // From React, not from the label: labels are translated (and Chinese ones have no a-z to make an id from).
+  const id = useId()
   const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined
   return (
     <div className="flex flex-col gap-1">

@@ -8,10 +8,10 @@ export const MAX_SIDE = 1600
 export const MAX_PHOTOS = 12
 export const ACCEPTED = ['image/jpeg', 'image/png']
 
-/** Why a picked file cannot be used, or null if it can. */
-export function photoProblem(file: File): string | null {
-  if (!ACCEPTED.includes(file.type)) return 'Use a JPEG or PNG photo.'
-  if (file.size > MAX_PICKED_BYTES) return 'This photo is too big (at most 25 MB before it is made smaller).'
+/** Why a picked file cannot be used (a message key), or null if it can. */
+export function photoProblem(file: File): 'photos.wrongType' | 'photos.tooBigPicked' | null {
+  if (!ACCEPTED.includes(file.type)) return 'photos.wrongType'
+  if (file.size > MAX_PICKED_BYTES) return 'photos.tooBigPicked'
   return null
 }
 

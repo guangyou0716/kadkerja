@@ -2,35 +2,38 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { api, type JobSummary } from '../api'
 import { ErrorNote, StatusBadge } from '../components'
+import { errorText } from '../errors'
+import { useI18n } from '../i18n/context'
 import { BOARD_COLUMNS } from '../status'
 
 /** Open job cards in columns by where they are in the workshop. */
 export function Board() {
+  const { t } = useI18n()
   const jobs = useQuery({ queryKey: ['jobs'], queryFn: api.jobs })
-  if (jobs.isPending) return <p className="text-slate-700">Loading job cards…</p>
-  if (jobs.isError) return <ErrorNote>{jobs.error.message}</ErrorNote>
+  if (jobs.isPending) return <p className="text-slate-700">{t('board.loading')}</p>
+  if (jobs.isError) return <ErrorNote>{errorText(jobs.error, t)}</ErrorNote>
   const open = jobs.data.filter((j) => j.status !== 'COLLECTED' && j.status !== 'CANCELLED')
   const done = jobs.data.length - open.length
   return (
     <section aria-labelledby="board-title">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <h1 id="board-title" className="text-2xl font-bold text-slate-900">
-          Job board
+          {t('board.title')}
         </h1>
         <p className="text-sm text-slate-700">
-          {open.length} open · {done} collected or cancelled
+          {t('board.counts', { open: open.length, done })}
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {BOARD_COLUMNS.map((col) => {
           const cards = open.filter((j) => col.statuses.includes(j.status))
           return (
-            <section key={col.title} aria-label={col.title} className="rounded-lg bg-slate-100 p-3">
+            <section key={col.title} aria-label={t(col.title)} className="rounded-lg bg-slate-100 p-3">
               <h2 className="mb-2 flex justify-between text-sm font-semibold text-slate-800">
-                {col.title} <span aria-label={`${cards.length} jobs`}>{cards.length}</span>
+                {t(col.title)} <span aria-label={t('board.jobs', { count: cards.length })}>{cards.length}</span>
               </h2>
               {cards.length === 0 ? (
-                <p className="text-sm text-slate-600">Nothing here.</p>
+                <p className="text-sm text-slate-600">{t('board.empty')}</p>
               ) : (
                 <ul className="flex flex-col gap-2">
                   {cards.map((j) => (
@@ -48,6 +51,7 @@ export function Board() {
 
 /** One job on the board or in "My jobs". */
 export function JobTile({ job }: { job: JobSummary }) {
+  const { t } = useI18n()
   return (
     <li>
       <Link
@@ -64,7 +68,7 @@ export function JobTile({ job }: { job: JobSummary }) {
         <p className="mt-1 line-clamp-2 text-sm text-slate-800">{job.complaint}</p>
         <p className="mt-1 flex justify-between gap-2 text-xs text-slate-600">
           <span>{job.number}</span>
-          <span>{job.assignedTo ? `Tech: ${job.assignedTo.name}` : 'No technician yet'}</span>
+          <span>{job.assignedTo ? t('tile.tech', { name: job.assignedTo.name }) : t('tile.noTech')}</span>
         </p>
       </Link>
     </li>

@@ -1,22 +1,23 @@
 import type { JobCard } from './api'
+import { translate, type Lang } from './i18n/core'
 import { formatRm } from './money'
 
-/** The customer's progress page for this job on this site. */
-export function customerLink(origin: string, token: string): string {
-  return `${origin}/t/${token}`
+/** The customer's progress page for this job on this site; with [lang] it opens in that language. */
+export function customerLink(origin: string, token: string, lang?: Lang): string {
+  return `${origin}/t/${token}${lang ? `?lang=${lang}` : ''}`
 }
 
-/** The message staff send with the link; what it says depends on where the job is. */
-export function whatsappText(job: JobCard, link: string): string {
-  const hi = `Hi ${job.customer.name.split(' ')[0]},`
+/** The message staff send with the link, in [lang]; what it says depends on where the job is. */
+export function whatsappText(job: JobCard, link: string, lang: Lang = 'en'): string {
+  const hi = translate(lang, 'wa.hi', { name: job.customer.name.split(' ')[0] })
   const car = `${job.vehicle.plate} (${job.number})`
   switch (job.status) {
     case 'QUOTED':
-      return `${hi} the quote for ${car} is ready: ${formatRm(job.totalSen)} incl. SST. Please check it and tap Approve or Decline here: ${link}`
+      return translate(lang, 'wa.quoted', { hi, car, total: formatRm(job.totalSen), link })
     case 'READY':
-      return `${hi} ${car} is ready to collect. Details: ${link}`
+      return translate(lang, 'wa.ready', { hi, car, link })
     default:
-      return `${hi} you can follow the progress of ${car} here: ${link}`
+      return translate(lang, 'wa.progress', { hi, car, link })
   }
 }
 

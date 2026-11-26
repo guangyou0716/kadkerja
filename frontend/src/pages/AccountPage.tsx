@@ -2,10 +2,13 @@ import { useMutation } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { api, ApiError } from '../api'
 import { buttonClass, ErrorNote, Field, inputClass } from '../components'
+import { errorText } from '../errors'
+import { useI18n } from '../i18n/context'
 import { useMe } from '../session'
 
 /** Change my own password. Other devices signed in as me are signed out; this one stays. */
 export function AccountPage() {
+  const { t, rich } = useI18n()
   const me = useMe()
   const [fields, setFields] = useState<Record<string, string>>({})
   const [changed, setChanged] = useState(false)
@@ -22,7 +25,7 @@ export function AccountPage() {
     setChanged(false)
     change.reset()
     if (next !== String(f.get('repeat') ?? '')) {
-      setFields({ repeat: 'the two new passwords are not the same' })
+      setFields({ repeat: t('account.notSame') })
       return
     }
     setFields({})
@@ -39,31 +42,30 @@ export function AccountPage() {
   return (
     <section aria-labelledby="account-title" className="max-w-md">
       <h1 id="account-title" className="mb-1 text-2xl font-bold text-slate-900">
-        My password
+        {t('account.title')}
       </h1>
       <p className="mb-4 text-sm text-slate-700">
-        Signed in as <span className="font-mono">{me.username}</span>. After a change, other devices signed in as you are
-        signed out.
+        {rich('account.signedInAs', { username: <span className="font-mono">{me.username}</span> })}
       </p>
       <form onSubmit={submit} noValidate className="flex flex-col gap-4 rounded-lg bg-white p-4 shadow-sm">
-        {change.isError && Object.keys(fields).length === 0 && <ErrorNote>{change.error.message}</ErrorNote>}
+        {change.isError && Object.keys(fields).length === 0 && <ErrorNote>{errorText(change.error, t)}</ErrorNote>}
         {changed && (
           <p role="status" className="text-sm text-teal-900">
-            Password changed. Other devices are signed out.
+            {t('account.changed')}
           </p>
         )}
-        <Field label="Current password" error={fields.currentPassword}>
+        <Field label={t('account.current')} error={fields.currentPassword}>
           {(p) => <input {...p} name="currentPassword" type="password" autoComplete="current-password" className={inputClass} />}
         </Field>
-        <Field label="New password" error={fields.newPassword} hint="At least 12 characters">
+        <Field label={t('account.new')} error={fields.newPassword} hint={t('account.newHint')}>
           {(p) => <input {...p} name="newPassword" type="password" autoComplete="new-password" className={inputClass} />}
         </Field>
-        <Field label="New password again" error={fields.repeat}>
+        <Field label={t('account.repeat')} error={fields.repeat}>
           {(p) => <input {...p} name="repeat" type="password" autoComplete="new-password" className={inputClass} />}
         </Field>
         <div>
           <button type="submit" className={buttonClass} disabled={change.isPending}>
-            {change.isPending ? 'Saving…' : 'Change password'}
+            {change.isPending ? t('account.saving') : t('account.submit')}
           </button>
         </div>
       </form>
