@@ -22,7 +22,8 @@ public record JobCardView(
     long totalSen,
     int sstRatePercent,
     String publicToken,
-    List<EventView> events) {
+    List<EventView> events,
+    JobCardSummary.Assignee assignedTo) {
 
   public record VehicleView(long id, String plate, String make, String model, Integer year) {}
 
@@ -60,7 +61,8 @@ public record JobCardView(
         j.totalSen(rate),
         rate,
         j.getPublicToken(),
-        j.getEvents().stream().map(JobCardView::event).toList());
+        j.getEvents().stream().map(JobCardView::event).toList(),
+        JobCardSummary.Assignee.of(j.getAssignedTo()));
   }
 
   private static LineView line(QuoteLine l, int rate) {

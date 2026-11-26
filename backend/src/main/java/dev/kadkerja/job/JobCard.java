@@ -1,5 +1,6 @@
 package dev.kadkerja.job;
 
+import dev.kadkerja.staff.StaffUser;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -67,6 +68,11 @@ public class JobCard {
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
+
+  /** The technician working on the car (null = not assigned yet). */
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "assigned_to")
+  private StaffUser assignedTo;
 
   @OneToMany(mappedBy = "jobCard", cascade = CascadeType.ALL, orphanRemoval = true)
   @OrderBy("id")
@@ -137,6 +143,17 @@ public class JobCard {
     JobStatus to = decision == Decision.APPROVE ? JobStatus.APPROVED : JobStatus.DECLINED;
     events.add(new StatusEvent(this, status, to, now, note, Actor.CUSTOMER));
     status = to;
+  }
+
+  /**
+   * Gives the job to a technician (or to nobody with null). A finished job keeps whoever worked
+   * on it. Who may be assigned is checked by the caller (an active technician).
+   */
+  public void assign(StaffUser technician) {
+    if (status.finished()) {
+      throw new RuleException("A " + status + " job cannot be reassigned.");
+    }
+    assignedTo = technician;
   }
 
   /** "KK-2026-0042": shown on paper and in messages. */
@@ -234,6 +251,10 @@ public class JobCard {
 
   public Instant getCreatedAt() {
     return createdAt;
+  }
+
+  public StaffUser getAssignedTo() {
+    return assignedTo;
   }
 
   public List<QuoteLine> getLines() {

@@ -71,6 +71,14 @@ public class DemoData implements CommandLineRunner {
     service.move(c.id(), JobStatus.APPROVED, "Approved by phone.");
     service.move(c.id(), JobStatus.IN_PROGRESS, null);
 
+    // The demo technician has two cars: one being inspected, one being repaired.
+    users.findByUsername("tech")
+        .ifPresent(
+            tech -> {
+              service.assign(b.id(), tech.getId());
+              service.assign(c.id(), tech.getId());
+            });
+
     service.checkIn(
         new CheckIn("Siti Demo", "012-0000004", "PJM 77", "Toyota", "Vios", 2018, 98_000,
             "Tyre rotation and alignment."));

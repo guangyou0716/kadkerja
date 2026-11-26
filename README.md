@@ -6,8 +6,8 @@
 the front desk writes down the complaint, the mechanic finds the problem, someone phones the customer with a
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
-Status: **work in progress** (increments 1-3 of 6 and the first half of 4: the API, the staff web app, the
-customer's progress link, staff sign-in with roles). Plan in [Roadmap](#roadmap).
+Status: **work in progress** (increments 1-3 of 6 and most of 4: the API, the staff web app, the
+customer's progress link, staff sign-in with roles, technician assignment and "My jobs"). Plan in [Roadmap](#roadmap).
 
 **Try it: [kadkerja-demo.guangyou.workers.dev](https://kadkerja-demo.guangyou.workers.dev)** (browser-only demo).
 Sign in as `advisor` (service advisor) or `tech` (technician), password `demo-kadkerja`. Open the quoted job
@@ -38,10 +38,19 @@ only). Two roles:
 | --- | --- | --- |
 | See the board and job cards | yes | yes |
 | Check in a car, make a new customer link | yes | no |
-| Add or remove quote lines (while inspecting) | yes | yes |
-| Moves | all | start inspection, start the approved repair, mark it ready |
+| Give a car to a technician (or take it back) | yes | no |
+| Add or remove quote lines (while inspecting) | yes | on their own or unassigned cars |
+| Moves | all | start inspection, start the approved repair, mark it ready (own or unassigned cars) |
+| *My jobs*: own cars, to work on / waiting | - | yes |
 
-The server enforces this (`403` with the reason); the web app only hides what the role cannot use.
+A technician can open any job card but changes only cars assigned to them or to nobody; starting work on an
+unassigned car makes it theirs. Only an active technician can be given a car, and a collected or cancelled job
+keeps whoever worked on it. The server enforces all of this (`403`/`409` with the reason); the web app only
+hides what the person cannot use.
+
+<p>
+  <img src="docs/my-jobs-phone.png" alt="My jobs on a phone, signed in as the technician: three cars to work on (in progress first, then inspecting, then received), each with plate, car, customer, complaint and 'Tech: Hafiz Demo', and an empty 'Waiting for the customer or advisor' list" width="240">
+</p>
 
 <p>
   <img src="docs/sign-in.png" alt="Staff sign-in form after a wrong password: 'Wrong username or password.'" width="420">
@@ -140,13 +149,16 @@ Everything under `/api/jobs` needs a signed-in session (and the CSRF header for 
 | `POST` | `/api/auth/login` | Sign in `{username, password}` -> who and which role |
 | `GET` | `/api/auth/me` | Who is signed in (`401` if nobody) |
 | `POST` | `/api/auth/logout` | Sign out (`204`) |
-| `GET` | `/api/jobs?status=QUOTED` | Job board rows, newest first (optional status filter) |
+| `GET` | `/api/jobs?status=QUOTED` | Job board rows with the assigned technician, newest first (optional status filter) |
+| `GET` | `/api/jobs?mine=true` | Job cards assigned to the signed-in person |
 | `POST` | `/api/jobs` | Check in a car (creates the job card) |
 | `GET` | `/api/jobs/{id}` | Job card with vehicle, customer, quote lines, totals, timeline, next moves |
 | `POST` | `/api/jobs/{id}/lines` | Add a quote line `{kind: LABOUR/PART, description, quantity, unitPriceSen, taxable}` |
 | `DELETE` | `/api/jobs/{id}/lines/{lineId}` | Remove a quote line |
 | `POST` | `/api/jobs/{id}/moves` | Move the job `{to, note?}` |
 | `POST` | `/api/jobs/{id}/link` | Make a new customer link (the old one stops working) |
+| `PUT` | `/api/jobs/{id}/assignee` | Advisor: give the job to a technician `{staffId}` (`null` = nobody) |
+| `GET` | `/api/staff` | Advisor: staff list (id, username, name, role, active; never password hashes) |
 | `GET` | `/api/public/jobs/{token}` | Customer view: progress, sent quote, whether it can be answered |
 | `POST` | `/api/public/jobs/{token}/answer` | Customer answer `{decision: APPROVE/DECLINE, quoteVersion, note?}` |
 
@@ -195,7 +207,7 @@ the schema.
   live in one file (`frontend/src/status.ts`); the allowed moves always come from the server.
 - The rules live in the domain (`JobStatus`, `JobCard`): every change goes through methods that check them, so
   no caller can skip a step. Views are built inside the service transaction (`open-in-view` is off).
-- Backend tests (56): every one of the 81 status pairs is checked against an independent table, every status is
+- Backend tests (61): every one of the 81 status pairs is checked against an independent table, every status is
   reachable and none is a dead end; 2,000 random quotes add up exactly (lines, tax, total) and per-line tax is
   never more than half a sen off; the whole flow through the HTTP API with MockMvc; refused moves and edits
   change nothing; field-by-field validation; plate reuse, owner changes and the one-open-job rule; the token never leaks; demo
@@ -208,8 +220,10 @@ the schema.
   wrong password / unknown user / disabled account, the guessing limit (also unit-tested with a clock), CSRF
   refused when missing or mismatched and accepted the browser's way (cookie -> header, new token after
   sign-in), sign-in itself needs the token, an overlong password is just wrong, the first-admin bootstrap, sign-out, and what a technician may and may not do (every
-  status pair checked).
-- Frontend tests (56, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+  status pair checked). Assignment with real sign-ins: only an active technician and only by the advisor, my jobs,
+  taking a car back, a finished job keeps its technician, another technician's car is refused for moves and quote
+  lines, starting an unassigned car takes it (a refused move does not), and the staff list has no hashes.
+- Frontend tests (72, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
@@ -217,10 +231,12 @@ the schema.
   with the version shown, a changed quote is explained and reloaded, hidden draft quote, expired link, a confirmation closes if a newer quote arrives), the
   WhatsApp message and number format, and *New link* only after confirming; sign-in (wrong then right password,
   the CSRF header on sign-in and on changes, back to the form when the session ends, sign-out really shows the
-  form again) and the technician's view (no check-in, no customer link, only workshop moves). Price parsing round-trips every formatted amount.
+  form again) and the technician's view (no check-in, no customer link, only workshop moves); assigning a technician (only active
+  technicians offered, one who has left still shown, unassign), another technician's car is read-only, *My jobs*
+  order and empty state, who has each car on the board. Price parsing round-trips every formatted amount.
   Browser demo: the in-browser stand-in's sign-in, seed totals, the whole check-in -> quote -> customer approval
-  flow, the stale-quote and double-answer refusals, technician limits, form checks, what the customer link hides,
-  new links; the whole app signing in and approving on it; reset; and both builds (the real one without demo code).
+  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, form checks, what the customer link hides,
+  new links; the whole app signing in and approving on it, *My jobs*; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
 
@@ -229,7 +245,8 @@ the schema.
 1. ✅ Backend: job cards, status flow, quotes with SST, REST API, validation, tests on H2 and PostgreSQL, CI.
 2. ✅ React + TypeScript staff web app: job board by status, check-in form, job card page with quote editor.
 3. ✅ Customer progress link (no login): timeline, quote, approve/decline with a stale-quote guard, WhatsApp text.
-4. ✅ Staff sign-in (Spring Security; advisor and technician roles). Next: technician assignment, "my jobs".
+4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs".
+   Next: staff management (the advisor adds and deactivates staff, resets passwords).
 5. Before/after photos, parts stock deducted on approval.
 6. Bahasa Melayu and 简体中文, accessibility pass, Docker Compose, Playwright end-to-end tests, demo GIF.
 

@@ -112,7 +112,8 @@ class AuthApiTest {
     assertThat(r.getResponse().getContentAsString()).doesNotContain(PASSWORD).doesNotContainIgnoringCase("password");
     mvc.perform(get("/api/auth/me").session(s))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.name").value("Test Advisor"));
+        .andExpect(jsonPath("$.name").value("Test Advisor"))
+        .andExpect(jsonPath("$.id").isNumber());
     mvc.perform(get("/api/jobs").session(s)).andExpect(status().isOk());
   }
 

@@ -46,7 +46,8 @@ export function Board() {
   )
 }
 
-function JobTile({ job }: { job: JobSummary }) {
+/** One job on the board or in "My jobs". */
+export function JobTile({ job }: { job: JobSummary }) {
   return (
     <li>
       <Link
@@ -61,7 +62,10 @@ function JobTile({ job }: { job: JobSummary }) {
           {job.vehicle} · {job.customer}
         </p>
         <p className="mt-1 line-clamp-2 text-sm text-slate-800">{job.complaint}</p>
-        <p className="mt-1 text-xs text-slate-600">{job.number}</p>
+        <p className="mt-1 flex justify-between gap-2 text-xs text-slate-600">
+          <span>{job.number}</span>
+          <span>{job.assignedTo ? `Tech: ${job.assignedTo.name}` : 'No technician yet'}</span>
+        </p>
       </Link>
     </li>
   )

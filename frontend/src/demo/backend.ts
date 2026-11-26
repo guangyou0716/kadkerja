@@ -7,14 +7,14 @@
  * It is NOT security: everything lives in the visitor's own browser. The real server does sign-in,
  * CSRF, rate limits and link expiry; here they are skipped or simplified.
  */
-import type { Actor, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, PublicJob, Role } from '../api'
+import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, PublicJob, StaffMember } from '../api'
 import { STATUSES, type JobStatus } from '../status'
 
 /** Published demo sign-ins (same as the server's demo profile). */
 export const DEMO_PASSWORD = 'demo-kadkerja'
-export const DEMO_STAFF: (Me & { role: Role })[] = [
-  { username: 'advisor', name: 'Farah Demo', role: 'ADVISOR' },
-  { username: 'tech', name: 'Hafiz Demo', role: 'TECHNICIAN' },
+export const DEMO_STAFF: StaffMember[] = [
+  { id: 1, username: 'advisor', name: 'Farah Demo', role: 'ADVISOR', active: true },
+  { id: 2, username: 'tech', name: 'Hafiz Demo', role: 'TECHNICIAN', active: true },
 ]
 const WORKSHOP = 'Demo Auto Workshop (browser demo)'
 const SST_RATE = 8
@@ -46,6 +46,8 @@ interface Job {
   publicToken: string
   lines: Line[]
   events: Event[]
+  /** Staff id of the technician, or null. */
+  assignedTo: number | null
 }
 interface Vehicle {
   id: number
@@ -63,9 +65,11 @@ interface Customer {
 
 /** Everything the demo remembers (saved as JSON in localStorage). */
 export interface DemoState {
-  version: 1
+  /** 2 added staff and technician assignment; older saved demos are thrown away and seeded again. */
+  version: 2
   seq: number
   signedIn: string | null
+  staff: StaffMember[]
   customers: Customer[]
   vehicles: Vehicle[]
   jobs: Job[]
@@ -89,6 +93,9 @@ const NEXT: Record<JobStatus, JobStatus[]> = {
 }
 const TECH_MOVES = ['RECEIVED>INSPECTING', 'APPROVED>IN_PROGRESS', 'IN_PROGRESS>READY']
 const quoteEditable = (s: JobStatus) => s === 'RECEIVED' || s === 'INSPECTING'
+/** The front desk itself (seed data). */
+const FRONT_DESK: Me = { id: 0, username: '', name: '', role: 'ADVISOR' }
+const asMe = (s: StaffMember): Me => ({ id: s.id, username: s.username, name: s.name, role: s.role })
 
 class Problem extends Error {
   readonly status: number
@@ -129,9 +136,12 @@ export class DemoBackend {
 
   /** A fresh demo workshop: two staff, five cars at different steps. Names and numbers are made up. */
   static seeded(now: () => Date = () => new Date()): DemoBackend {
-    const b = new DemoBackend({ version: 1, seq: 0, signedIn: null, customers: [], vehicles: [], jobs: [] }, now)
+    const b = new DemoBackend(
+      { version: 2, seq: 0, signedIn: null, staff: DEMO_STAFF.map((s) => ({ ...s })), customers: [], vehicles: [], jobs: [] },
+      now,
+    )
     const ago = (minutes: number) => new Date(now().getTime() - minutes * 60_000).toISOString()
-    const staffMove = (id: number, to: JobStatus, at: string, note: string | null = null) => b.move(id, to, note, 'ADVISOR', at)
+    const staffMove = (id: number, to: JobStatus, at: string, note: string | null = null) => b.move(id, to, note, FRONT_DESK, at)
 
     const a = b.checkIn(
       { customerName: 'Aiman Demo', phone: '012-0000001', plate: 'PKR 1234', make: 'Perodua', model: 'Myvi', year: 2019, mileageKm: 84210, complaint: 'Squeaking brakes at low speed; service due.' },
@@ -159,6 +169,9 @@ export class DemoBackend {
     staffMove(k.id, 'QUOTED', ago(250))
     staffMove(k.id, 'APPROVED', ago(240), 'Approved by phone.')
     staffMove(k.id, 'IN_PROGRESS', ago(200))
+    // The demo technician has two cars: one being inspected, one being repaired (as on the server).
+    m.assignedTo = 2
+    k.assignedTo = 2
 
     b.checkIn(
       { customerName: 'Siti Demo', phone: '012-0000004', plate: 'PJM 77', make: 'Toyota', model: 'Vios', year: 2018, mileageKm: 98000, complaint: 'Tyre rotation and alignment.' },
@@ -183,9 +196,9 @@ export class DemoBackend {
 
   /** Answers one API request the way the server would. */
   handle(method: string, url: string, body: unknown): DemoResponse {
-    const path = url.split('?')[0]
+    const [path, query = ''] = url.split('?')
     try {
-      return this.route(method.toUpperCase(), path, (body ?? {}) as Record<string, unknown>)
+      return this.route(method.toUpperCase(), path, (body ?? {}) as Record<string, unknown>, new URLSearchParams(query))
     } catch (e) {
       if (e instanceof Problem) {
         return { status: e.status, body: { detail: e.message, ...(Object.keys(e.fields).length ? { fields: e.fields } : {}) } }
@@ -194,7 +207,7 @@ export class DemoBackend {
     }
   }
 
-  private route(method: string, path: string, body: Record<string, unknown>): DemoResponse {
+  private route(method: string, path: string, body: Record<string, unknown>, query: URLSearchParams): DemoResponse {
     if (method === 'GET' && path === '/api/auth/csrf') return { status: 200, body: { headerName: 'X-XSRF-TOKEN', token: 'browser-demo' } }
     if (method === 'POST' && path === '/api/auth/login') return { status: 200, body: this.login(String(body.username ?? ''), String(body.password ?? '')) }
 
@@ -214,26 +227,36 @@ export class DemoBackend {
       this.state.signedIn = null
       return { status: 204 }
     }
+    if (method === 'GET' && path === '/api/staff') {
+      if (me.role !== 'ADVISOR') throw new Problem(403, 'Your role cannot do this, or the page is out of date (reload and try again).')
+      return { status: 200, body: this.staffList() }
+    }
     if (path === '/api/jobs') {
-      if (method === 'GET') return { status: 200, body: this.list() }
+      if (method === 'GET') return { status: 200, body: this.list(query.get('mine') === 'true' ? me.id : undefined) }
       if (method === 'POST') {
         if (me.role !== 'ADVISOR') throw new Problem(403, 'Only the service advisor checks in cars.')
         return { status: 201, body: this.view(this.checkIn(validCheckIn(body))) }
       }
     }
-    m = /^\/api\/jobs\/(\d+)(?:\/(lines|moves|link)(?:\/(\d+))?)?$/.exec(path)
+    m = /^\/api\/jobs\/(\d+)(?:\/(lines|moves|link|assignee)(?:\/(\d+))?)?$/.exec(path)
     if (m) {
       const id = Number(m[1])
       const [, , what, lineId] = m
       if (!what && method === 'GET') return { status: 200, body: this.view(this.find(id)) }
-      if (what === 'lines' && !lineId && method === 'POST') return { status: 200, body: this.view(this.addLine(id, validLine(body))) }
-      if (what === 'lines' && lineId && method === 'DELETE') return { status: 200, body: this.view(this.removeLine(id, Number(lineId))) }
+      if (what === 'lines' && !lineId && method === 'POST') return { status: 200, body: this.view(this.addLine(id, validLine(body), me)) }
+      if (what === 'lines' && lineId && method === 'DELETE') return { status: 200, body: this.view(this.removeLine(id, Number(lineId), me)) }
       if (what === 'moves' && method === 'POST') {
         const to = body.to as JobStatus
         if (!STATUSES.includes(to)) throw new Problem(400, 'Some fields need fixing.', { to: 'must not be null' })
         const note = typeof body.note === 'string' ? body.note : null
         if (note && note.length > 500) throw new Problem(400, 'Some fields need fixing.', { note: 'size must be between 0 and 500' })
-        return { status: 200, body: this.view(this.move(id, to, note, me.role)) }
+        return { status: 200, body: this.view(this.move(id, to, note, me)) }
+      }
+      if (what === 'assignee' && method === 'PUT') {
+        if (me.role !== 'ADVISOR') throw new Problem(403, 'Your role cannot do this, or the page is out of date (reload and try again).')
+        const staffId = body.staffId
+        if (staffId !== null && staffId !== undefined && !Number.isInteger(staffId)) throw new Problem(400, 'The request could not be read.')
+        return { status: 200, body: this.view(this.assign(id, (staffId as number | null | undefined) ?? null)) }
       }
       if (what === 'link' && method === 'POST') {
         if (me.role !== 'ADVISOR') throw new Problem(403, 'Only the service advisor can make a new customer link.')
@@ -248,16 +271,47 @@ export class DemoBackend {
   // ---- staff ----
 
   private login(username: string, password: string): Me {
-    const user = DEMO_STAFF.find((s) => s.username === username.trim())
-    if (!user || password !== DEMO_PASSWORD) throw new Problem(401, 'Wrong username or password.')
+    const user = this.state.staff.find((s) => s.username === username.trim().toLowerCase())
+    // Same answer for unknown user, wrong password and a deactivated account (as on the server).
+    if (!user || !user.active || password !== DEMO_PASSWORD) throw new Problem(401, 'Wrong username or password.')
     this.state.signedIn = user.username
-    return user
+    return asMe(user)
   }
 
   private me(): Me {
-    const user = DEMO_STAFF.find((s) => s.username === this.state.signedIn)
-    if (!user) throw new Problem(401, 'Please sign in to continue.')
-    return user
+    const user = this.state.staff.find((s) => s.username === this.state.signedIn)
+    if (!user || !user.active) throw new Problem(401, 'Please sign in to continue.')
+    return asMe(user)
+  }
+
+  /** Active people first, then by name (as on the server). */
+  private staffList(): StaffMember[] {
+    return [...this.state.staff]
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+      .map((s) => ({ ...s }))
+  }
+
+  private assignee(id: number | null): Assignee | null {
+    const s = id === null ? undefined : this.state.staff.find((x) => x.id === id)
+    return s ? { id: s.id, name: s.name } : null
+  }
+
+  /** A technician may change only a job that is theirs or that nobody has yet. */
+  private requireMayWorkOn(job: Job, me: Me) {
+    if (me.role === 'TECHNICIAN' && job.assignedTo !== null && job.assignedTo !== me.id) {
+      throw new Problem(403, `This job is assigned to ${this.assignee(job.assignedTo)?.name}. Ask the service advisor to reassign it.`)
+    }
+  }
+
+  assign(id: number, staffId: number | null): Job {
+    const job = this.find(id)
+    if (staffId !== null) {
+      const tech = this.state.staff.find((s) => s.id === staffId)
+      if (!tech || !tech.active || tech.role !== 'TECHNICIAN') throw new Problem(409, 'Pick an active technician.')
+    }
+    if (NEXT[job.status].length === 0) throw new Problem(409, `A ${job.status} job cannot be reassigned.`)
+    job.assignedTo = staffId
+    return job
   }
 
   // ---- jobs ----
@@ -293,20 +347,23 @@ export class DemoBackend {
       publicToken: newToken(),
       lines: [],
       events: [{ from: null, to: 'RECEIVED', at, note: null, by: 'STAFF' }],
+      assignedTo: null,
     }
     this.state.jobs.push(job)
     return job
   }
 
-  addLine(id: number, line: NewLine): Job {
+  addLine(id: number, line: NewLine, me: Me = FRONT_DESK): Job {
     const job = this.find(id)
+    this.requireMayWorkOn(job, me)
     requireEditable(job)
     job.lines.push({ id: ++this.state.seq, ...line, description: line.description.trim() })
     return job
   }
 
-  private removeLine(id: number, lineId: number): Job {
+  private removeLine(id: number, lineId: number, me: Me): Job {
     const job = this.find(id)
+    this.requireMayWorkOn(job, me)
     requireEditable(job)
     const before = job.lines.length
     job.lines = job.lines.filter((l) => l.id !== lineId)
@@ -314,11 +371,12 @@ export class DemoBackend {
     return job
   }
 
-  move(id: number, to: JobStatus, note: string | null, role: Role, at: string = this.now().toISOString()): Job {
+  move(id: number, to: JobStatus, note: string | null, me: Me = FRONT_DESK, at: string = this.now().toISOString()): Job {
     const job = this.find(id)
-    if (role !== 'ADVISOR' && !TECH_MOVES.includes(`${job.status}>${to}`)) {
+    if (me.role !== 'ADVISOR' && !TECH_MOVES.includes(`${job.status}>${to}`)) {
       throw new Problem(403, `A technician cannot move a job from ${job.status} to ${to}; the service advisor does that.`)
     }
+    this.requireMayWorkOn(job, me)
     if (!NEXT[job.status].includes(to)) throw new Problem(409, `A job that is ${job.status} cannot move to ${to}.`)
     if (to === 'QUOTED') {
       if (job.lines.length === 0) throw new Problem(409, 'Add at least one quote line before sending the quote.')
@@ -326,6 +384,8 @@ export class DemoBackend {
     }
     job.events.push({ from: job.status, to, at, note: note?.trim() || null, by: 'STAFF' })
     job.status = to
+    // A technician's move on an unassigned job makes it theirs.
+    if (me.role === 'TECHNICIAN' && job.assignedTo === null) job.assignedTo = me.id
     return job
   }
 
@@ -378,12 +438,13 @@ export class DemoBackend {
 
   // ---- views ----
 
-  private list(): JobSummary[] {
-    return [...this.state.jobs]
+  private list(mine?: number): JobSummary[] {
+    return this.state.jobs
+      .filter((j) => mine === undefined || j.assignedTo === mine)
       .sort((a, b) => b.id - a.id)
       .map((j) => {
         const v = this.vehicle(j.vehicleId)
-        return { id: j.id, number: this.number(j), status: j.status, plate: v.plate, vehicle: `${v.make} ${v.model}`, customer: this.customer(j.customerId).name, complaint: j.complaint, createdAt: j.createdAt }
+        return { id: j.id, number: this.number(j), status: j.status, plate: v.plate, vehicle: `${v.make} ${v.model}`, customer: this.customer(j.customerId).name, complaint: j.complaint, createdAt: j.createdAt, assignedTo: this.assignee(j.assignedTo) }
       })
   }
 
@@ -406,6 +467,7 @@ export class DemoBackend {
       sstRatePercent: SST_RATE,
       publicToken: j.publicToken,
       events: j.events.map((e) => ({ ...e })),
+      assignedTo: this.assignee(j.assignedTo),
     }
   }
 

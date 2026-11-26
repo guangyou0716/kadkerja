@@ -36,5 +36,8 @@ class MigrationTest {
         .containsExactly("STAFF", "STAFF");
     assertThat(jdbc.queryForObject("select note from status_event where to_status = 'QUOTED'", String.class))
         .isEqualTo("old note");
+    // V4: jobs from before assignment existed have nobody assigned.
+    assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(4);
+    assertThat(jdbc.queryForObject("select assigned_to from job_card where id = 1", Long.class)).isNull();
   }
 }

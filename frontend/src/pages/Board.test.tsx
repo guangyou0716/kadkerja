@@ -12,6 +12,7 @@ const row = (id: number, status: JobSummary['status'], plate: string): JobSummar
   customer: 'Test Customer',
   complaint: 'Noise',
   createdAt: '2026-11-26T02:00:00Z',
+  assignedTo: null,
 })
 
 describe('Board', () => {
@@ -35,6 +36,13 @@ describe('Board', () => {
     expect(within(col('Ready to collect')).getByText('DDD 4')).toBeInTheDocument()
     expect(screen.queryByText('EEE 5')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /AAA 1/ })).toHaveAttribute('href', '/jobs/1')
+  })
+
+  it('shows who has each car', async () => {
+    fakeApi(() => ({ body: [{ ...row(1, 'IN_PROGRESS', 'AAA 1'), assignedTo: { id: 2, name: 'Test Tech' } }, row(2, 'RECEIVED', 'BBB 2')] }))
+    renderAt('/')
+    expect(await screen.findByRole('link', { name: /AAA 1.*Tech: Test Tech/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /BBB 2.*No technician yet/ })).toBeInTheDocument()
   })
 
   it('says so when a column is empty', async () => {

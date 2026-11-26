@@ -8,7 +8,10 @@ function load(storage: Storage): DemoBackend {
   if (saved) {
     try {
       const state = JSON.parse(saved) as DemoState
-      if (state.version === 1) return new DemoBackend(state)
+      // An older or damaged save is not patched up: the demo starts again from the seed.
+      if (state?.version === 2 && [state.staff, state.jobs, state.vehicles, state.customers].every(Array.isArray)) {
+        return new DemoBackend(state)
+      }
     } catch {
       // Unreadable: start again below.
     }
@@ -26,7 +29,7 @@ export function installDemo(storage: Storage = window.localStorage): void {
   const realFetch = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.pathname + input.search : input.url
-    const path = url.startsWith('http') ? new URL(url).pathname : url
+    const path = url.startsWith('http') ? new URL(url).pathname + new URL(url).search : url
     if (!path.startsWith('/api/')) return realFetch(input, init)
     const backend = load(storage)
     const body = typeof init?.body === 'string' && init.body ? JSON.parse(init.body) : undefined

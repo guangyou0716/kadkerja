@@ -3,7 +3,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { vi } from 'vitest'
 import { AppRoutes } from '../App'
-import type { JobCard, Me, PublicJob } from '../api'
+import type { JobCard, Me, PublicJob, StaffMember } from '../api'
 
 /** The app at [path] with a fresh cache (no retries, so errors show at once). */
 export function renderAt(path: string) {
@@ -19,17 +19,27 @@ export function renderAt(path: string) {
 
 type Handler = (url: string, init: RequestInit | undefined) => { status?: number; body: unknown }
 
-export const ADVISOR: Me = { username: 'advisor', name: 'Test Advisor', role: 'ADVISOR' }
-export const TECH: Me = { username: 'tech', name: 'Test Tech', role: 'TECHNICIAN' }
+export const ADVISOR: Me = { id: 1, username: 'advisor', name: 'Test Advisor', role: 'ADVISOR' }
+export const TECH: Me = { id: 2, username: 'tech', name: 'Test Tech', role: 'TECHNICIAN' }
+
+export const STAFF: StaffMember[] = [
+  { id: 1, username: 'advisor', name: 'Test Advisor', role: 'ADVISOR', active: true },
+  { id: 2, username: 'tech', name: 'Test Tech', role: 'TECHNICIAN', active: true },
+  { id: 3, username: 'tech2', name: 'Other Tech', role: 'TECHNICIAN', active: true },
+  { id: 4, username: 'gone', name: 'Left Tech', role: 'TECHNICIAN', active: false },
+]
 
 /**
- * Replaces fetch; returns the mock so tests can look at the requests. Sign-in calls are answered
- * here: signed in as [me] (an advisor by default; null = not signed in).
+ * Replaces fetch; returns the mock so tests can look at the requests. Sign-in calls and the staff
+ * list (GET /api/staff) are answered here: signed in as [me] (an advisor by default; null = not
+ * signed in).
  */
-export function fakeApi(handler: Handler, { me = ADVISOR }: { me?: Me | null } = {}) {
+export function fakeApi(handler: Handler, { me = ADVISOR, staff = STAFF }: { me?: Me | null; staff?: StaffMember[] } = {}) {
   const mock = vi.fn(async (url: string, init?: RequestInit) => {
     const auth =
-      url === '/api/auth/me'
+      url === '/api/staff' && (init?.method ?? 'GET') === 'GET'
+        ? { status: 200, body: staff }
+        : url === '/api/auth/me'
         ? me
           ? { status: 200, body: me }
           : { status: 401, body: { detail: 'Please sign in to continue.' } }
@@ -72,6 +82,7 @@ export function job(over: Partial<JobCard> = {}): JobCard {
       { from: null, to: 'RECEIVED', at: '2026-11-26T02:00:00Z', note: null, by: 'STAFF' },
       { from: 'RECEIVED', to: 'INSPECTING', at: '2026-11-26T02:10:00Z', note: 'Bay 2', by: 'STAFF' },
     ],
+    assignedTo: null,
     ...over,
   }
 }
