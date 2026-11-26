@@ -141,7 +141,7 @@ describe('demo backend: customer link', () => {
 
 describe('demo backend: technicians', () => {
   const addTech = (b: DemoBackend, active = true) => {
-    b.state.staff.push({ id: 3, username: 'tech2', name: 'Other Demo', role: 'TECHNICIAN', active })
+    b.state.staff.push({ id: 3, username: 'tech2', name: 'Other Demo', role: 'TECHNICIAN', active, password: DEMO_PASSWORD })
   }
 
   it('the seeded technician has two cars and sees only those in my jobs', () => {
@@ -211,5 +211,75 @@ describe('demo backend: technicians', () => {
       status: 401,
       body: { detail: 'Wrong username or password.' },
     })
+  })
+})
+
+describe('demo backend: staff management', () => {
+  const NEW = 'a brand new passphrase'
+  const add = (b: DemoBackend, over: Record<string, unknown> = {}) =>
+    b.handle('POST', '/api/staff', { username: ' Tech.Two ', name: 'New Demo', role: 'TECHNICIAN', password: NEW, ...over })
+
+  it('the advisor adds someone who can then sign in with that password', () => {
+    const b = signedIn()
+    const created = add(b)
+    expect(created).toEqual({ status: 201, body: { id: 3, username: 'tech.two', name: 'New Demo', role: 'TECHNICIAN', active: true } })
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech.two', password: NEW }).status).toBe(200)
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech.two', password: DEMO_PASSWORD }).status).toBe(401)
+  })
+
+  it('checks new accounts like the server', () => {
+    const b = signedIn()
+    expect(add(b, { username: 'TECH' })).toEqual({ status: 409, body: { detail: 'Some fields need fixing.', fields: { username: 'this username is taken' } } })
+    expect(add(b, { username: 'new1', password: 'too short' }).body).toMatchObject({ fields: { password: 'use at least 12 characters' } })
+    expect(add(b, { username: 'new2', password: '密'.repeat(30) }).body).toMatchObject({ fields: { password: 'use at most 72 bytes (about 72 letters)' } })
+    expect(add(b, { username: 'no spaces' }).status).toBe(400)
+    expect(add(b, { username: 'new3', role: 'OWNER' }).status).toBe(400)
+    b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD })
+    expect(add(b, { username: 'new4' }).status).toBe(403)
+    expect(b.state.staff).toHaveLength(2)
+  })
+
+  it('deactivating signs them out, hands back open jobs only, and reactivating lets them in', () => {
+    const b = signedIn()
+    const done = byPlate(b, 'PJM 77')
+    b.handle('PUT', `/api/jobs/${done.id}/assignee`, { staffId: 2 })
+    b.handle('POST', `/api/jobs/${done.id}/moves`, { to: 'CANCELLED' })
+    expect(b.handle('POST', '/api/staff/2/deactivate', {}).body).toMatchObject({ active: false })
+    expect(byPlate(b, 'BKE 5021').assignedTo).toBeNull()
+    expect(card(b, done.id).assignedTo).toEqual({ id: 2, name: 'Hafiz Demo' })
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD }).status).toBe(401)
+    b.handle('POST', '/api/auth/login', { username: 'advisor', password: DEMO_PASSWORD })
+    expect(b.handle('POST', '/api/staff/2/activate', {}).body).toMatchObject({ active: true })
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD }).status).toBe(200)
+  })
+
+  it('nobody deactivates themselves or sets their own password here; another advisor can be deactivated', () => {
+    const b = signedIn()
+    expect(b.handle('POST', '/api/staff/1/deactivate', {})).toMatchObject({ status: 409, body: { detail: 'You cannot deactivate your own account.' } })
+    expect(b.handle('POST', '/api/staff/1/password', { password: NEW })).toMatchObject({
+      status: 409,
+      body: { detail: 'Use "Change my password" for your own account.' },
+    })
+    expect(b.handle('POST', '/api/staff/99/deactivate', {}).status).toBe(404)
+    add(b, { username: 'boss2', role: 'ADVISOR' })
+    b.handle('POST', '/api/auth/login', { username: 'boss2', password: NEW })
+    expect(b.handle('POST', '/api/staff/1/deactivate', {}).body).toMatchObject({ username: 'advisor', active: false })
+    // boss2 is now the only active advisor; the advisor who was just deactivated is signed out.
+    expect(b.handle('POST', '/api/auth/login', { username: 'advisor', password: DEMO_PASSWORD }).status).toBe(401)
+  })
+
+  it('the advisor sets a new password; I change my own with the current one', () => {
+    const b = signedIn()
+    expect(b.handle('POST', '/api/staff/2/password', { password: 'short' }).body).toMatchObject({ fields: { password: 'use at least 12 characters' } })
+    expect(b.handle('POST', '/api/staff/2/password', { password: NEW }).status).toBe(200)
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD }).status).toBe(401)
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech', password: NEW }).status).toBe(200)
+    const change = (currentPassword: string, newPassword: string) => b.handle('POST', '/api/auth/password', { currentPassword, newPassword })
+    expect(change('wrong one!!!', 'another passphrase').body).toMatchObject({ fields: { currentPassword: 'this is not your current password' } })
+    expect(change(NEW, NEW).body).toMatchObject({ fields: { newPassword: 'choose a password different from the current one' } })
+    expect(change(NEW, 'another passphrase').status).toBe(204)
+    expect(b.handle('GET', '/api/auth/me', undefined).status).toBe(200)
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech', password: 'another passphrase' }).status).toBe(200)
+    expect(JSON.stringify(b.handle('GET', '/api/staff', undefined))).not.toContain('passphrase')
   })
 })

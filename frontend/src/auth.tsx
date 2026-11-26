@@ -77,7 +77,7 @@ export function SignOutButton() {
     <button
       type="button"
       onClick={() => logout.mutate()}
-      className="rounded-md px-3 py-2 text-sm font-semibold text-teal-50 hover:bg-teal-800"
+      className="whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold text-teal-50 hover:bg-teal-800"
     >
       Sign out
     </button>

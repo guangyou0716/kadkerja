@@ -2,6 +2,7 @@ package dev.kadkerja.web;
 
 import dev.kadkerja.job.NotFoundException;
 import dev.kadkerja.job.RuleException;
+import dev.kadkerja.staff.FieldException;
 import java.util.Map;
 import java.util.TreeMap;
 import org.springframework.http.HttpHeaders;
@@ -29,6 +30,14 @@ public class ErrorHandler extends ResponseEntityExceptionHandler {
   @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
   ProblemDetail denied(org.springframework.security.access.AccessDeniedException e) {
     return problem(HttpStatus.FORBIDDEN, "Not allowed", e.getMessage());
+  }
+
+  /** A field only the server can check: shown next to that field, like a validation error. */
+  @ExceptionHandler(FieldException.class)
+  ResponseEntity<ProblemDetail> field(FieldException e) {
+    ProblemDetail p = problem(e.status(), "Check the form", "Some fields need fixing.");
+    p.setProperty("fields", Map.of(e.field(), e.getMessage()));
+    return ResponseEntity.status(e.status()).body(p);
   }
 
   @ExceptionHandler(NotFoundException.class)

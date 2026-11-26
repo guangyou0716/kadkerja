@@ -2,14 +2,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router'
 import type { Me } from './api'
 import { AuthGate, SignOutButton } from './auth'
+import { AccountPage } from './pages/AccountPage'
 import { Board } from './pages/Board'
 import { CheckInPage } from './pages/CheckInPage'
 import { CustomerPage } from './pages/CustomerPage'
 import { JobPage } from './pages/JobPage'
 import { MyJobs } from './pages/MyJobs'
+import { StaffPage } from './pages/StaffPage'
 
 const nav = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-2 text-sm font-semibold ${isActive ? 'bg-teal-800 text-white' : 'text-teal-50 hover:bg-teal-800'}`
+  `whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold ${isActive ? 'bg-teal-800 text-white' : 'text-teal-50 hover:bg-teal-800'}`
 
 export function Layout() {
   return <AuthGate>{(me) => <StaffApp me={me} />}</AuthGate>
@@ -27,19 +29,27 @@ function StaffApp({ me }: { me: Me }) {
               Job board
             </NavLink>
             {advisor ? (
-              <NavLink to="/check-in" className={nav}>
-                Check in a car
-              </NavLink>
+              <>
+                <NavLink to="/check-in" className={nav}>
+                  Check in a car
+                </NavLink>
+                <NavLink to="/staff" className={nav}>
+                  Staff
+                </NavLink>
+              </>
             ) : (
               <NavLink to="/my-jobs" className={nav}>
                 My jobs
               </NavLink>
             )}
           </nav>
-          <div className="flex items-center gap-2 text-sm text-teal-50">
+          <div className="flex flex-wrap items-center gap-x-2 text-sm text-teal-50">
             <span>
               {me.name} · {advisor ? 'Service advisor' : 'Technician'}
             </span>
+            <NavLink to="/account" className={nav}>
+              My password
+            </NavLink>
             <SignOutButton />
           </div>
         </div>
@@ -52,6 +62,11 @@ function StaffApp({ me }: { me: Me }) {
             element={advisor ? <CheckInPage /> : <p className="text-slate-800">Only the service advisor checks in cars.</p>}
           />
           <Route path="/my-jobs" element={<MyJobs />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route
+            path="/staff"
+            element={advisor ? <StaffPage /> : <p className="text-slate-800">Only the service advisor manages staff.</p>}
+          />
           <Route path="/jobs/:id" element={<JobPage />} />
           <Route path="*" element={<p className="text-slate-800">Page not found.</p>} />
         </Routes>

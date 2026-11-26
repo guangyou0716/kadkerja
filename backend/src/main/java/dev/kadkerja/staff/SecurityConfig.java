@@ -17,6 +17,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -75,7 +76,8 @@ public class SecurityConfig {
   SecurityFilterChain filterChain(
       HttpSecurity http,
       CookieCsrfTokenRepository csrfRepo,
-      SecurityContextRepository contextRepo)
+      SecurityContextRepository contextRepo,
+      StaffUserRepository users)
       throws Exception {
     // Plain (not masked) token: the SPA reads it from the cookie; it is never put into HTML.
     CsrfTokenRequestAttributeHandler csrfHandler = new CsrfTokenRequestAttributeHandler();
@@ -104,6 +106,8 @@ public class SecurityConfig {
                     .csrfTokenRequestHandler(csrfHandler)
                     .ignoringRequestMatchers("/api/public/**"))
         .securityContext(s -> s.securityContextRepository(contextRepo))
+        // Not a bean, so it runs only here (once, after the session's sign-in is known).
+        .addFilterBefore(new StaffSessionFilter(users), AuthorizationFilter.class)
         .formLogin(AbstractHttpConfigurer::disable)
         .httpBasic(AbstractHttpConfigurer::disable)
         .logout(
