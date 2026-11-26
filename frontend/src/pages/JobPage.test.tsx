@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fakeApi, job, renderAt } from '../test/render'
 
 const bodyOf = (init: RequestInit | undefined) => JSON.parse(String(init?.body))
@@ -116,5 +116,57 @@ describe('JobPage', () => {
     fakeApi(() => ({ status: 404, body: { detail: 'There is no job card 99.' } }))
     renderAt('/jobs/99')
     expect(await screen.findByRole('alert')).toHaveTextContent('There is no job card 99.')
+  })
+})
+
+describe('JobPage customer link', () => {
+  it('shows the link and a WhatsApp message for the customer', async () => {
+    fakeApi(() => ({ body: job({ status: 'QUOTED', next: ['APPROVED', 'DECLINED', 'INSPECTING', 'CANCELLED'] }) }))
+    renderAt('/jobs/7')
+    const input = await screen.findByRole('textbox', { name: 'Customer link' })
+    expect(input).toHaveValue(`${window.location.origin}/t/TestTokenTestTokenTest01`)
+    const wa = screen.getByRole('link', { name: 'Send on WhatsApp' })
+    expect(wa.getAttribute('href')).toMatch(/^https:\/\/wa\.me\/60120000001\?text=/)
+    expect(decodeURIComponent(wa.getAttribute('href')!)).toContain('RM 203.58 incl. SST')
+    expect(wa).toHaveAttribute('rel', 'noreferrer')
+  })
+
+  it('makes a new link only after confirming', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi((url, init) =>
+      init?.method === 'POST' && url.endsWith('/link')
+        ? { body: job({ publicToken: 'NewTokenNewTokenNewTok02' }) }
+        : { body: job() },
+    )
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    renderAt('/jobs/7')
+    await user.click(await screen.findByRole('button', { name: 'New link' }))
+    expect(api.mock.calls.some(([u]) => u === '/api/jobs/7/link')).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'New link' }))
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Customer link' })).toHaveValue(
+        `${window.location.origin}/t/NewTokenNewTokenNewTok02`,
+      ),
+    )
+    expect(confirm).toHaveBeenCalledTimes(2)
+    confirm.mockRestore()
+  })
+
+  it('marks moves the customer made through the link', async () => {
+    fakeApi(() =>
+      ({
+        body: job({
+          status: 'APPROVED',
+          next: ['IN_PROGRESS'],
+          events: [
+            ...job().events,
+            { from: 'INSPECTING', to: 'QUOTED', at: '2026-11-26T03:00:00Z', note: null, by: 'STAFF' },
+            { from: 'QUOTED', to: 'APPROVED', at: '2026-11-26T03:05:00Z', note: null, by: 'CUSTOMER' },
+          ],
+        }),
+      }),
+    )
+    renderAt('/jobs/7')
+    expect(await screen.findByText('by customer (link)')).toBeInTheDocument()
   })
 })

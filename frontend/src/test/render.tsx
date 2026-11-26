@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { vi } from 'vitest'
-import { Layout } from '../App'
-import type { JobCard } from '../api'
+import { AppRoutes } from '../App'
+import type { JobCard, PublicJob } from '../api'
 
 /** The app at [path] with a fresh cache (no retries, so errors show at once). */
 export function renderAt(path: string) {
@@ -11,7 +11,7 @@ export function renderAt(path: string) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
-        <Layout />
+        <AppRoutes />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -52,9 +52,39 @@ export function job(over: Partial<JobCard> = {}): JobCard {
     taxSen: 1508,
     totalSen: 20358,
     sstRatePercent: 8,
+    publicToken: 'TestTokenTestTokenTest01',
     events: [
-      { from: null, to: 'RECEIVED', at: '2026-11-26T02:00:00Z', note: null },
-      { from: 'RECEIVED', to: 'INSPECTING', at: '2026-11-26T02:10:00Z', note: 'Bay 2' },
+      { from: null, to: 'RECEIVED', at: '2026-11-26T02:00:00Z', note: null, by: 'STAFF' },
+      { from: 'RECEIVED', to: 'INSPECTING', at: '2026-11-26T02:10:00Z', note: 'Bay 2', by: 'STAFF' },
+    ],
+    ...over,
+  }
+}
+
+export function publicJob(over: Partial<PublicJob> = {}): PublicJob {
+  return {
+    workshop: 'Demo Auto Workshop',
+    number: 'KK-2026-0007',
+    status: 'QUOTED',
+    plate: 'PKR 1234',
+    vehicle: 'Perodua Myvi',
+    complaint: 'Brakes squeak',
+    checkedInAt: '2026-11-26T02:00:00Z',
+    quoteVisible: true,
+    quoteVersion: 2,
+    lines: [
+      { kind: 'LABOUR', description: 'Brake service', quantity: 1, unitPriceSen: 6000, taxable: true, subtotalSen: 6000, taxSen: 480 },
+      { kind: 'PART', description: 'Brake pads', quantity: 2, unitPriceSen: 6425, taxable: true, subtotalSen: 12850, taxSen: 1028 },
+    ],
+    subtotalSen: 18850,
+    taxSen: 1508,
+    totalSen: 20358,
+    sstRatePercent: 8,
+    canAnswer: true,
+    timeline: [
+      { status: 'RECEIVED', at: '2026-11-26T02:00:00Z', by: 'STAFF' },
+      { status: 'INSPECTING', at: '2026-11-26T02:10:00Z', by: 'STAFF' },
+      { status: 'QUOTED', at: '2026-11-26T03:00:00Z', by: 'STAFF' },
     ],
     ...over,
   }

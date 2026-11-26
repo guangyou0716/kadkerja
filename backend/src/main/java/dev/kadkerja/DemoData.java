@@ -5,6 +5,8 @@ import dev.kadkerja.job.JobCardService;
 import dev.kadkerja.job.JobCardService.CheckIn;
 import dev.kadkerja.job.JobStatus;
 import dev.kadkerja.job.LineKind;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("demo")
 public class DemoData implements CommandLineRunner {
+  private static final Logger log = LoggerFactory.getLogger(DemoData.class);
   private final JobCardService service;
 
   public DemoData(JobCardService service) {
@@ -32,7 +35,8 @@ public class DemoData implements CommandLineRunner {
     service.addLine(a.id(), LineKind.PART, "Front brake pads (set)", 1, 12_800, true);
     service.addLine(a.id(), LineKind.PART, "Engine oil 5W-30, 4 L", 1, 11_500, true);
     service.move(a.id(), JobStatus.INSPECTING, null);
-    service.move(a.id(), JobStatus.QUOTED, "Pads at 2 mm; oil change due.");
+    JobCardView quoted = service.move(a.id(), JobStatus.QUOTED, "Pads at 2 mm; oil change due.");
+    log.info("Demo customer link for {}: http://localhost:5173/t/{}", quoted.number(), quoted.publicToken());
 
     JobCardView b =
         service.checkIn(

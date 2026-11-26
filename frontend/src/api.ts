@@ -40,7 +40,32 @@ export interface JobCard {
   taxSen: number
   totalSen: number
   sstRatePercent: number
-  events: { from: JobStatus | null; to: JobStatus; at: string; note: string | null }[]
+  /** Key of the customer's progress link (/t/<token>). */
+  publicToken: string
+  events: { from: JobStatus | null; to: JobStatus; at: string; note: string | null; by: Actor }[]
+}
+
+export type Actor = 'STAFF' | 'CUSTOMER'
+export type Decision = 'APPROVE' | 'DECLINE'
+
+/** What the customer's progress link shows (no ids, no personal details, no staff notes). */
+export interface PublicJob {
+  workshop: string
+  number: string
+  status: JobStatus
+  plate: string
+  vehicle: string
+  complaint: string
+  checkedInAt: string
+  quoteVisible: boolean
+  quoteVersion: number
+  lines: Omit<QuoteLine, 'id'>[]
+  subtotalSen: number
+  taxSen: number
+  totalSen: number
+  sstRatePercent: number
+  canAnswer: boolean
+  timeline: { status: JobStatus; at: string; by: Actor }[]
 }
 
 export interface CheckIn {
@@ -106,4 +131,12 @@ export const api = {
     call<JobCard>(`/api/jobs/${id}/lines/${lineId}`, { method: 'DELETE' }),
   move: (id: number, to: JobStatus, note?: string) =>
     post<JobCard>(`/api/jobs/${id}/moves`, { to, note: note || undefined }),
+  resetLink: (id: number) => post<JobCard>(`/api/jobs/${id}/link`, {}),
+  publicJob: (token: string) => call<PublicJob>(`/api/public/jobs/${encodeURIComponent(token)}`),
+  answer: (token: string, decision: Decision, quoteVersion: number, note?: string) =>
+    post<PublicJob>(`/api/public/jobs/${encodeURIComponent(token)}/answer`, {
+      decision,
+      quoteVersion,
+      note: note || undefined,
+    }),
 }

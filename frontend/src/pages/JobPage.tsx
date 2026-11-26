@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, ApiError, type JobCard, type LineKind } from '../api'
 import { buttonClass, ErrorNote, Field, inputClass, secondaryButtonClass, StatusBadge } from '../components'
+import { customerLink, whatsappText, whatsappUrl } from '../link'
 import { formatRm, parseRm } from '../money'
 import { MOVE_LABEL, STATUS_LABEL, type JobStatus } from '../status'
 
@@ -63,7 +64,10 @@ export function JobPage() {
         <Quote job={j} onSaved={onSaved} />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
-        <Moves job={j} onSaved={onSaved} />
+        <div className="flex flex-col gap-4">
+          <Moves job={j} onSaved={onSaved} />
+          <CustomerLink job={j} onSaved={onSaved} />
+        </div>
         <Timeline job={j} />
       </div>
     </article>
@@ -277,11 +281,60 @@ function Timeline({ job }: { job: JobCard }) {
         {job.events.map((e, i) => (
           <li key={i} className="text-sm">
             <span className="font-medium text-slate-900">{STATUS_LABEL[e.to]}</span>
+            {e.by === 'CUSTOMER' && <span className="ml-1 text-slate-700">by customer (link)</span>}
             <span className="ml-2 text-slate-600">{when(e.at)}</span>
             {e.note && <p className="text-slate-800">{e.note}</p>}
           </li>
         ))}
       </ol>
+    </section>
+  )
+}
+
+function CustomerLink({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }) {
+  const [copied, setCopied] = useState(false)
+  const reset = useMutation({ mutationFn: () => api.resetLink(job.id), onSuccess: onSaved })
+  const link = customerLink(window.location.origin, job.publicToken)
+  const text = whatsappText(job, link)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <section aria-labelledby="link-title" className="flex flex-col gap-2 rounded-lg bg-white p-4 shadow-sm">
+      <h2 id="link-title" className="font-semibold text-slate-900">
+        Customer link
+      </h2>
+      <p className="text-sm text-slate-700">
+        No login needed: the customer sees progress{job.status === 'QUOTED' ? ' and can approve or decline the quote' : ''}.
+      </p>
+      <input readOnly aria-label="Customer link" value={link} className={`${inputClass} font-mono text-xs`} onFocus={(e) => e.target.select()} />
+      {reset.isError && <ErrorNote>{reset.error.message}</ErrorNote>}
+      <div className="flex flex-wrap gap-2">
+        <a href={whatsappUrl(job.customer.phone, text)} target="_blank" rel="noreferrer" className={buttonClass}>
+          Send on WhatsApp
+        </a>
+        <button type="button" className={secondaryButtonClass} onClick={() => void copy()}>
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+        <button
+          type="button"
+          className={secondaryButtonClass}
+          disabled={reset.isPending}
+          onClick={() => {
+            if (window.confirm('Make a new link? The old link stops working at once.')) {
+              setCopied(false)
+              reset.mutate()
+            }
+          }}
+        >
+          New link
+        </button>
+      </div>
     </section>
   )
 }

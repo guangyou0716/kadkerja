@@ -70,4 +70,10 @@ public class JobCardController {
   public JobCardView move(@PathVariable long id, @Valid @RequestBody MoveRequest r) {
     return service.move(id, r.to(), r.note());
   }
+
+  /** A new customer link; the old one stops working. */
+  @PostMapping("/{id}/link")
+  public JobCardView resetLink(@PathVariable long id) {
+    return service.resetLink(id);
+  }
 }
