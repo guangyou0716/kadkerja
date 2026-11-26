@@ -37,7 +37,9 @@ public record JobCardView(
       long unitPriceSen,
       boolean taxable,
       long subtotalSen,
-      long taxSen) {}
+      long taxSen,
+      Long partId,
+      String partSku) {}
 
   public record EventView(JobStatus from, JobStatus to, Instant at, String note, Actor by) {}
 
@@ -74,7 +76,9 @@ public record JobCardView(
         l.getUnitPriceSen(),
         l.isTaxable(),
         l.subtotalSen(),
-        l.taxSen(rate));
+        l.taxSen(rate),
+        l.getPart() == null ? null : l.getPart().getId(),
+        l.getPart() == null ? null : l.getPart().getSku());
   }
 
   private static EventView event(StatusEvent e) {

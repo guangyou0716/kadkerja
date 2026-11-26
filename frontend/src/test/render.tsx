@@ -3,7 +3,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { vi } from 'vitest'
 import { AppRoutes } from '../App'
-import type { JobCard, Me, PublicJob, StaffMember } from '../api'
+import type { JobCard, Me, Part, PublicJob, StaffMember } from '../api'
 
 /** The app at [path] with a fresh cache (no retries, so errors show at once). */
 export function renderAt(path: string) {
@@ -29,16 +29,26 @@ export const STAFF: StaffMember[] = [
   { id: 4, username: 'gone', name: 'Left Tech', role: 'TECHNICIAN', active: false },
 ]
 
+export const PARTS: Part[] = [
+  { id: 31, sku: 'BP-MYV-F', name: 'Front brake pads (set)', unitPriceSen: 12800, onHand: 6, reorderLevel: 2, low: false },
+  { id: 32, sku: 'OIL-5W30-4', name: 'Engine oil 5W-30, 4 L', unitPriceSen: 11500, onHand: -1, reorderLevel: 4, low: true },
+]
+
 /**
  * Replaces fetch; returns the mock so tests can look at the requests. Sign-in calls and the staff
  * list (GET /api/staff) are answered here: signed in as [me] (an advisor by default; null = not
  * signed in).
  */
-export function fakeApi(handler: Handler, { me = ADVISOR, staff = STAFF }: { me?: Me | null; staff?: StaffMember[] } = {}) {
+export function fakeApi(
+  handler: Handler,
+  { me = ADVISOR, staff = STAFF, parts = PARTS }: { me?: Me | null; staff?: StaffMember[]; parts?: Part[] } = {},
+) {
   const mock = vi.fn(async (url: string, init?: RequestInit) => {
     const auth =
       url === '/api/staff' && (init?.method ?? 'GET') === 'GET'
         ? { status: 200, body: staff }
+        : url === '/api/parts' && (init?.method ?? 'GET') === 'GET'
+        ? { status: 200, body: parts }
         : url === '/api/auth/me'
         ? me
           ? { status: 200, body: me }
@@ -70,8 +80,8 @@ export function job(over: Partial<JobCard> = {}): JobCard {
     customer: { id: 1, name: 'Test Customer', phone: '012-0000001' },
     quoteVersion: 0,
     lines: [
-      { id: 11, kind: 'LABOUR', description: 'Brake service', quantity: 1, unitPriceSen: 6000, taxable: true, subtotalSen: 6000, taxSen: 480 },
-      { id: 12, kind: 'PART', description: 'Brake pads', quantity: 2, unitPriceSen: 6425, taxable: true, subtotalSen: 12850, taxSen: 1028 },
+      { id: 11, kind: 'LABOUR', description: 'Brake service', quantity: 1, unitPriceSen: 6000, taxable: true, subtotalSen: 6000, taxSen: 480, partId: null, partSku: null },
+      { id: 12, kind: 'PART', description: 'Brake pads', quantity: 2, unitPriceSen: 6425, taxable: true, subtotalSen: 12850, taxSen: 1028, partId: null, partSku: null },
     ],
     subtotalSen: 18850,
     taxSen: 1508,

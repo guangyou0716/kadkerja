@@ -29,6 +29,40 @@ export interface QuoteLine {
   taxable: boolean
   subtotalSen: number
   taxSen: number
+  /** The stock part this line takes when the quote is approved (null = not from stock). */
+  partId: number | null
+  partSku: string | null
+}
+
+/** A part on the workshop's shelf. onHand below zero = that many still to order. */
+export interface Part {
+  id: number
+  sku: string
+  name: string
+  unitPriceSen: number
+  onHand: number
+  reorderLevel: number
+  /** At or below the reorder level. */
+  low: boolean
+}
+
+export interface NewPart {
+  sku: string
+  name: string
+  unitPriceSen: number
+  onHand: number
+  reorderLevel: number
+}
+
+/** One change to a part's count. jobId/jobNumber only for parts taken for a job; by = null for the customer. */
+export interface StockMovement {
+  id: number
+  at: string
+  change: number
+  reason: 'COUNTED' | 'RECEIVED' | 'TAKEN'
+  jobId: number | null
+  jobNumber: string | null
+  by: string | null
 }
 
 export interface JobCard {
@@ -67,7 +101,7 @@ export interface PublicJob {
   checkedInAt: string
   quoteVisible: boolean
   quoteVersion: number
-  lines: Omit<QuoteLine, 'id'>[]
+  lines: Omit<QuoteLine, 'id' | 'partId' | 'partSku'>[]
   subtotalSen: number
   taxSen: number
   totalSen: number
@@ -93,6 +127,8 @@ export interface NewLine {
   quantity: number
   unitPriceSen: number
   taxable: boolean
+  /** Take this stock part when the quote is approved (part lines only). */
+  partId?: number
 }
 
 /** An error from the API (RFC 9457 problem+json), with a message per field for a 400. */
@@ -201,6 +237,11 @@ export const api = {
     post<void>('/api/auth/password', { currentPassword, newPassword }),
   assign: (id: number, staffId: number | null) =>
     call<JobCard>(`/api/jobs/${id}/assignee`, { method: 'PUT', body: JSON.stringify({ staffId }) }),
+  parts: () => call<Part[]>('/api/parts'),
+  addPart: (body: NewPart) => post<Part>('/api/parts', body),
+  receivePart: (id: number, quantity: number) => post<Part>(`/api/parts/${id}/receive`, { quantity }),
+  countPart: (id: number, onHand: number) => post<Part>(`/api/parts/${id}/count`, { onHand }),
+  partHistory: (id: number) => call<StockMovement[]>(`/api/parts/${id}/movements`),
   job: (id: number) => call<JobCard>(`/api/jobs/${id}`),
   checkIn: (body: CheckIn) => post<JobCard>('/api/jobs', body),
   addLine: (id: number, line: NewLine) => post<JobCard>(`/api/jobs/${id}/lines`, line),

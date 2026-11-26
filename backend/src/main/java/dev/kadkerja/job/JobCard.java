@@ -1,6 +1,7 @@
 package dev.kadkerja.job;
 
 import dev.kadkerja.staff.StaffUser;
+import dev.kadkerja.stock.Part;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -164,8 +165,22 @@ public class JobCard {
 
   public QuoteLine addLine(
       LineKind kind, String description, int quantity, long unitPriceSen, boolean taxable) {
+    return addLine(kind, description, quantity, unitPriceSen, taxable, null);
+  }
+
+  /** A line; [part] (only for a PART line) is the stock part it takes when approved. */
+  public QuoteLine addLine(
+      LineKind kind,
+      String description,
+      int quantity,
+      long unitPriceSen,
+      boolean taxable,
+      Part part) {
     requireQuoteEditable();
-    QuoteLine line = new QuoteLine(this, kind, description, quantity, unitPriceSen, taxable);
+    if (part != null && kind != LineKind.PART) {
+      throw new RuleException("Only a part line can take a part from stock.");
+    }
+    QuoteLine line = new QuoteLine(this, kind, description, quantity, unitPriceSen, taxable, part);
     lines.add(line);
     return line;
   }

@@ -33,7 +33,22 @@ public final class Requests {
       @NotBlank @Size(max = 200) String description,
       @Min(1) @Max(999) int quantity,
       @Min(0) @Max(10_000_000) long unitPriceSen,
-      boolean taxable) {}
+      boolean taxable,
+      /* The stock part this line takes when approved (part lines only), or null. */
+      @Min(1) Long partId) {}
+
+  public record PartRequest(
+      @NotBlank
+          @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9._/-]{0,29}$", message = "1-30 letters, digits, dots, dashes or slashes")
+          String sku,
+      @NotBlank @Size(max = 200) String name,
+      @Min(0) @Max(10_000_000) long unitPriceSen,
+      @Min(0) @Max(99_999) int onHand,
+      @Min(0) @Max(99_999) int reorderLevel) {}
+
+  public record ReceiveRequest(@Min(1) @Max(9_999) int quantity) {}
+
+  public record CountRequest(@Min(0) @Max(99_999) int onHand) {}
 
   /** staffId null = nobody. */
   public record AssignRequest(Long staffId) {}

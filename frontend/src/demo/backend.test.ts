@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { JobCard, JobSummary, Me, PublicJob, StaffMember } from '../api'
+import type { JobCard, JobSummary, Me, Part, PublicJob, StaffMember, StockMovement } from '../api'
 import { DEMO_PASSWORD, DemoBackend } from './backend'
 
 const NOW = new Date('2026-11-27T02:00:00Z')
@@ -283,3 +283,86 @@ describe('demo backend: staff management', () => {
     expect(JSON.stringify(b.handle('GET', '/api/staff', undefined))).not.toContain('passphrase')
   })
 })
+
+describe('demo backend: parts shelf', () => {
+  const shelf = (b: DemoBackend) => b.handle('GET', '/api/parts', undefined).body as Part[]
+  const onHand = (b: DemoBackend, sku: string) => shelf(b).find((p) => p.sku === sku)!.onHand
+  const partId = (b: DemoBackend, sku: string) => shelf(b).find((p) => p.sku === sku)!.id
+  const token = (b: DemoBackend, plate: string) => byPlate(b, plate).publicToken
+
+  it('seeds four parts; the two approved demo jobs already took theirs', () => {
+    const b = signedIn()
+    expect(shelf(b).map((p) => [p.sku, p.onHand, p.low])).toEqual([
+      ['BAT-NS40ZL', 3, false],
+      ['BP-MYV-F', 6, false],
+      ['IGN-SAGA', 0, true],
+      ['OIL-5W30-4', 3, true],
+    ])
+    const history = b.handle('GET', `/api/parts/${partId(b, 'IGN-SAGA')}/movements`, undefined).body as StockMovement[]
+    expect(history.map((m) => [m.change, m.reason, m.jobNumber, m.by])).toEqual([
+      [-1, 'TAKEN', 'KK-2026-0003', 'Front desk'],
+      [1, 'COUNTED', null, 'Front desk'],
+    ])
+    expect(byPlate(b, 'PKR 1234').lines.map((l) => l.partSku)).toEqual([null, 'BP-MYV-F', 'OIL-5W30-4'])
+  })
+
+  it("the customer's approval takes the quoted parts once; declining takes nothing", () => {
+    const b = signedIn()
+    const t = token(b, 'PKR 1234')
+    const ok = b.handle('POST', `/api/public/jobs/${t}/answer`, { decision: 'APPROVE', quoteVersion: 1 })
+    expect(ok.status).toBe(200)
+    expect([onHand(b, 'BP-MYV-F'), onHand(b, 'OIL-5W30-4')]).toEqual([5, 2])
+    expect(b.handle('POST', `/api/public/jobs/${t}/answer`, { decision: 'APPROVE', quoteVersion: 1 }).status).toBe(409)
+    expect(onHand(b, 'BP-MYV-F')).toBe(5)
+    const last = (b.handle('GET', `/api/parts/${partId(b, 'BP-MYV-F')}/movements`, undefined).body as StockMovement[])[0]
+    expect(last).toMatchObject({ change: -1, reason: 'TAKEN', jobNumber: 'KK-2026-0001', by: null })
+  })
+
+  it('a staff approval names the advisor and may take the count below zero', () => {
+    const b = signedIn()
+    const id = jobs(b).find((j) => j.plate === 'PJM 77')!.id
+    const coil = partId(b, 'IGN-SAGA')
+    expect(b.handle('POST', `/api/jobs/${id}/lines`, { kind: 'PART', description: 'Coil', quantity: 2, unitPriceSen: 100, taxable: true, partId: coil }).status).toBe(200)
+    for (const to of ['INSPECTING', 'QUOTED', 'APPROVED']) expect(b.handle('POST', `/api/jobs/${id}/moves`, { to }).status).toBe(200)
+    expect(onHand(b, 'IGN-SAGA')).toBe(-2)
+    const last = (b.handle('GET', `/api/parts/${coil}/movements`, undefined).body as StockMovement[])[0]
+    expect(last.by).toBe('Farah Demo')
+  })
+
+  it('refuses a part on a labour line, an unknown part and a bad part id (server rules)', () => {
+    const b = signedIn()
+    const id = jobs(b).find((j) => j.plate === 'PJM 77')!.id
+    const line = { kind: 'LABOUR', description: 'X', quantity: 1, unitPriceSen: 100, taxable: true, partId: partId(b, 'BP-MYV-F') }
+    expect(b.handle('POST', `/api/jobs/${id}/lines`, line)).toEqual({ status: 409, body: { detail: 'Only a part line can take a part from stock.' } })
+    expect(b.handle('POST', `/api/jobs/${id}/lines`, { ...line, kind: 'PART', partId: 999 }).status).toBe(404)
+    expect(b.handle('POST', `/api/jobs/${id}/lines`, { ...line, kind: 'PART', partId: 0 }).status).toBe(400)
+    expect(byPlate(b, 'PJM 77').lines).toEqual([])
+  })
+
+  it('only the advisor adds, receives and counts; same checks as the server', () => {
+    const b = signedIn()
+    const part = { sku: 'wip-14', name: 'Wiper blade', unitPriceSen: 2500, onHand: 2, reorderLevel: 1 }
+    const added = b.handle('POST', '/api/parts', part)
+    expect(added.status).toBe(201)
+    expect(added.body).toMatchObject({ sku: 'WIP-14', onHand: 2, low: false })
+    expect(b.handle('POST', '/api/parts', { ...part, sku: 'WIP-14' }).body).toEqual({ detail: 'Some fields need fixing.', fields: { sku: 'this part number is already in stock' } })
+    for (const bad of [{ ...part, sku: '../x' }, { ...part, onHand: -1 }, { ...part, name: ' ' }, { ...part, unitPriceSen: 1.5 }]) {
+      expect(b.handle('POST', '/api/parts', bad).status).toBe(400)
+    }
+    const id = (added.body as Part).id
+    expect(b.handle('POST', `/api/parts/${id}/receive`, { quantity: 0 }).status).toBe(400)
+    expect((b.handle('POST', `/api/parts/${id}/receive`, { quantity: 5 }).body as Part).onHand).toBe(7)
+    expect((b.handle('POST', `/api/parts/${id}/count`, { onHand: 6 }).body as Part).onHand).toBe(6)
+    expect(b.handle('POST', `/api/parts/${id}/count`, { onHand: 6 }).status).toBe(200)
+    const history = b.handle('GET', `/api/parts/${id}/movements`, undefined).body as StockMovement[]
+    expect(history.map((m) => [m.change, m.reason])).toEqual([[-1, 'COUNTED'], [5, 'RECEIVED'], [2, 'COUNTED']])
+
+    b.handle('POST', '/api/auth/logout', {})
+    b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD })
+    expect(shelf(b)).toHaveLength(5)
+    expect(b.handle('POST', `/api/parts/${id}/receive`, { quantity: 5 }).status).toBe(403)
+    expect(b.handle('POST', '/api/parts', { ...part, sku: 'NEW' }).status).toBe(403)
+    expect(onHand(b, 'WIP-14')).toBe(6)
+  })
+})
+

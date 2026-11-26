@@ -64,11 +64,11 @@ describe('browser demo (whole app on the in-browser backend)', () => {
   it('throws away a saved demo from an older version or a damaged save and starts again', async () => {
     const old = { version: 1, seq: 0, signedIn: 'advisor', customers: [], vehicles: [], jobs: [] }
     const v2 = { ...old, version: 2, staff: [{ id: 1, username: 'advisor', name: 'Farah Demo', role: 'ADVISOR', active: true }] }
-    for (const saved of [JSON.stringify(old), JSON.stringify(v2), JSON.stringify({ ...old, version: 3 }), '{not json']) {
+    for (const saved of [JSON.stringify(old), JSON.stringify(v2), JSON.stringify({ ...old, version: 3 }), JSON.stringify({ ...v2, version: 4 }), '{not json']) {
       window.localStorage.setItem(STORAGE_KEY, saved)
       expect((await fetch('/api/auth/me')).status).toBe(401)
       const state = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)
-      expect(state.version).toBe(3)
+      expect(state.version).toBe(4)
       expect(state.jobs).toHaveLength(5)
       expect(state.staff.map((s: { username: string }) => s.username)).toEqual(['advisor', 'tech'])
     }

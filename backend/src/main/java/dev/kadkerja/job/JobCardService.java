@@ -4,6 +4,7 @@ import dev.kadkerja.staff.Role;
 import dev.kadkerja.staff.StaffUser;
 import dev.kadkerja.staff.StaffUserRepository;
 import dev.kadkerja.staff.Who;
+import dev.kadkerja.stock.StockService;
 import java.time.Clock;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +19,7 @@ public class JobCardService {
   private final VehicleRepository vehicles;
   private final JobCardRepository jobs;
   private final StaffUserRepository staff;
+  private final StockService stock;
   private final Clock clock;
   private final int sstRatePercent;
   private final String workshopName;
@@ -27,6 +29,7 @@ public class JobCardService {
       VehicleRepository vehicles,
       JobCardRepository jobs,
       StaffUserRepository staff,
+      StockService stock,
       Clock clock,
       @Value("${kadkerja.sst-rate-percent:8}") int sstRatePercent,
       @Value("${kadkerja.workshop-name:Demo Auto Workshop}") String workshopName) {
@@ -34,6 +37,7 @@ public class JobCardService {
     this.vehicles = vehicles;
     this.jobs = jobs;
     this.staff = staff;
+    this.stock = stock;
     this.clock = clock;
     this.sstRatePercent = sstRatePercent;
     this.workshopName = workshopName;
@@ -135,9 +139,23 @@ public class JobCardService {
       long unitPriceSen,
       boolean taxable,
       Who who) {
+    return addLine(id, kind, description, quantity, unitPriceSen, taxable, null, who);
+  }
+
+  /** A line; partId (part lines only) = the stock part it takes when the quote is approved. */
+  public JobCardView addLine(
+      long id,
+      LineKind kind,
+      String description,
+      int quantity,
+      long unitPriceSen,
+      boolean taxable,
+      Long partId,
+      Who who) {
     JobCard job = find(id);
     requireMayWorkOn(job, who);
-    job.addLine(kind, description.trim(), quantity, unitPriceSen, taxable);
+    var part = partId == null ? null : stock.find(partId);
+    job.addLine(kind, description.trim(), quantity, unitPriceSen, taxable, part);
     return view(jobs.saveAndFlush(job));
   }
 
@@ -166,10 +184,21 @@ public class JobCardService {
     requireMayWorkOn(job, who);
     boolean claim = who.technician() && who.id() != null && job.getAssignedTo() == null;
     job.moveTo(to, note == null || note.isBlank() ? null : note.trim(), clock.instant());
+    if (to == JobStatus.APPROVED) {
+      // Approved by phone or at the counter: the parts come off the shelf now.
+      stock.takeForApprovedQuote(job, nameOf(who));
+    }
     if (claim && !job.getStatus().finished()) {
       job.assign(staff.getReferenceById(who.id()));
     }
     return view(jobs.saveAndFlush(job));
+  }
+
+  /** For stock history: the staff member's name ("Front desk" for demo data and tests). */
+  private String nameOf(Who who) {
+    return who.id() == null
+        ? "Front desk"
+        : staff.findById(who.id()).map(StaffUser::getDisplayName).orElse("Front desk");
   }
 
   /** Someone has left: their open jobs go back to nobody (finished jobs keep their name). */
@@ -235,6 +264,9 @@ public class JobCardService {
     JobCard job = byToken(token);
     job.answerQuote(
         decision, seenVersion, note == null || note.isBlank() ? null : note.trim(), clock.instant());
+    if (decision == Decision.APPROVE) {
+      stock.takeForApprovedQuote(job, null);
+    }
     return PublicJobView.of(jobs.saveAndFlush(job), sstRatePercent, workshopName);
   }
 }
