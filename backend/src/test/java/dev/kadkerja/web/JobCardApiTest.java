@@ -3,6 +3,7 @@ package dev.kadkerja.web;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +24,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@WithMockUser(roles = "ADVISOR")
 class JobCardApiTest {
   @Autowired MockMvc mvc;
   @Autowired JdbcTemplate jdbc;
@@ -42,7 +45,7 @@ class JobCardApiTest {
       """;
 
   private ResultActions postJson(String url, String body) throws Exception {
-    return mvc.perform(post(url).contentType(MediaType.APPLICATION_JSON).content(body));
+    return mvc.perform(post(url).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body));
   }
 
   private long checkIn(String plate) throws Exception {
@@ -128,7 +131,7 @@ class JobCardApiTest {
         .andExpect(status().isConflict());
     String quoted = mvc.perform(get("/api/jobs/" + id)).andReturn().getResponse().getContentAsString();
     long lineId = ((Number) JsonPath.read(quoted, "$.lines[0].id")).longValue();
-    mvc.perform(delete("/api/jobs/" + id + "/lines/" + lineId)).andExpect(status().isConflict());
+    mvc.perform(delete("/api/jobs/" + id + "/lines/" + lineId).with(csrf())).andExpect(status().isConflict());
     mvc.perform(get("/api/jobs/" + id))
         .andExpect(jsonPath("$.status").value("QUOTED"))
         .andExpect(jsonPath("$.lines", hasSize(1)))
@@ -150,10 +153,10 @@ class JobCardApiTest {
     postJson(
         "/api/jobs/" + id + "/lines",
         "{\"kind\":\"PART\",\"description\":\"B\",\"quantity\":1,\"unitPriceSen\":200,\"taxable\":true}");
-    mvc.perform(delete("/api/jobs/" + id + "/lines/" + lineId))
+    mvc.perform(delete("/api/jobs/" + id + "/lines/" + lineId).with(csrf()))
         .andExpect(jsonPath("$.lines", hasSize(1)))
         .andExpect(jsonPath("$.lines[0].description").value("B"));
-    mvc.perform(delete("/api/jobs/" + id + "/lines/999999")).andExpect(status().isNotFound());
+    mvc.perform(delete("/api/jobs/" + id + "/lines/999999").with(csrf())).andExpect(status().isNotFound());
     move(id, "QUOTED").andExpect(jsonPath("$.quoteVersion").value(1));
     postJson("/api/jobs/" + id + "/moves", "{\"to\":\"INSPECTING\",\"note\":\"  cheaper option  \"}")
         .andExpect(jsonPath("$.events[3].note").value("cheaper option"));

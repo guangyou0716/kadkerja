@@ -1,8 +1,10 @@
 package dev.kadkerja.job;
 
+import dev.kadkerja.staff.Role;
 import java.time.Clock;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -120,8 +122,17 @@ public class JobCardService {
     return view(jobs.saveAndFlush(job));
   }
 
+  /** A move by someone at the front desk (demo data, tests). */
   public JobCardView move(long id, JobStatus to, String note) {
+    return move(id, to, note, Role.ADVISOR);
+  }
+
+  public JobCardView move(long id, JobStatus to, String note, Role role) {
     JobCard job = find(id);
+    if (!role.mayMove(job.getStatus(), to)) {
+      throw new AccessDeniedException(
+          "A technician cannot move a job from " + job.getStatus() + " to " + to + "; the service advisor does that.");
+    }
     job.moveTo(to, note == null || note.isBlank() ? null : note.trim(), clock.instant());
     return view(jobs.saveAndFlush(job));
   }

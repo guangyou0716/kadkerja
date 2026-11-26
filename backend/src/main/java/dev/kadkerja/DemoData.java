@@ -5,10 +5,14 @@ import dev.kadkerja.job.JobCardService;
 import dev.kadkerja.job.JobCardService.CheckIn;
 import dev.kadkerja.job.JobStatus;
 import dev.kadkerja.job.LineKind;
+import dev.kadkerja.staff.Role;
+import dev.kadkerja.staff.StaffUser;
+import dev.kadkerja.staff.StaffUserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 /** Made-up customers and cars for trying the app (profile "demo"). Names and numbers are fictional. */
@@ -16,14 +20,26 @@ import org.springframework.stereotype.Component;
 @Profile("demo")
 public class DemoData implements CommandLineRunner {
   private static final Logger log = LoggerFactory.getLogger(DemoData.class);
-  private final JobCardService service;
+  /** Demo sign-in only; published in the README. Never use the demo profile on a real server. */
+  public static final String DEMO_PASSWORD = "demo-kadkerja";
 
-  public DemoData(JobCardService service) {
+  private final JobCardService service;
+  private final StaffUserRepository users;
+  private final PasswordEncoder encoder;
+
+  public DemoData(JobCardService service, StaffUserRepository users, PasswordEncoder encoder) {
     this.service = service;
+    this.users = users;
+    this.encoder = encoder;
   }
 
   @Override
   public void run(String... args) {
+    if (users.count() == 0) {
+      users.save(new StaffUser("advisor", "Farah Demo", encoder.encode(DEMO_PASSWORD), Role.ADVISOR));
+      users.save(new StaffUser("tech", "Hafiz Demo", encoder.encode(DEMO_PASSWORD), Role.TECHNICIAN));
+      log.info("Demo staff: advisor / tech, password {}", DEMO_PASSWORD);
+    }
     if (!service.list(null).isEmpty()) {
       return;
     }

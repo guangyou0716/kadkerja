@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { fakeApi, job, renderAt } from '../test/render'
 
 async function fill(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText('Name'), 'Test Customer')
+  // The form appears once the app knows who is signed in.
+  await user.type(await screen.findByLabelText('Name'), 'Test Customer')
   await user.type(screen.getByLabelText('Phone'), '012-0000001')
   await user.type(screen.getByLabelText('Plate'), 'pkr1234')
   await user.type(screen.getByLabelText('Make'), 'Perodua')
@@ -44,7 +45,7 @@ describe('CheckInPage', () => {
       },
     }))
     renderAt('/check-in')
-    await user.click(screen.getByRole('button', { name: 'Check in' }))
+    await user.click(await screen.findByRole('button', { name: 'Check in' }))
     expect(await screen.findByText('use a Malaysian phone number like 012-3456789')).toBeInTheDocument()
     expect(screen.getByLabelText('Phone')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByLabelText('Phone')).toHaveAccessibleDescription('use a Malaysian phone number like 012-3456789')
@@ -64,7 +65,15 @@ describe('CheckInPage', () => {
 
   it('says when the server cannot be reached', async () => {
     const user = userEvent.setup()
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    const signedIn = fakeApi(() => ({ body: null }))
+    // Signed in, then the server goes away.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith('/api/auth/')) return signedIn(url, init)
+        throw new TypeError('Failed to fetch')
+      }),
+    )
     renderAt('/check-in')
     await fill(user)
     await user.click(screen.getByRole('button', { name: 'Check in' }))

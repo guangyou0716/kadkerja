@@ -3,7 +3,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { vi } from 'vitest'
 import { AppRoutes } from '../App'
-import type { JobCard, PublicJob } from '../api'
+import type { JobCard, Me, PublicJob } from '../api'
 
 /** The app at [path] with a fresh cache (no retries, so errors show at once). */
 export function renderAt(path: string) {
@@ -19,10 +19,25 @@ export function renderAt(path: string) {
 
 type Handler = (url: string, init: RequestInit | undefined) => { status?: number; body: unknown }
 
-/** Replaces fetch; returns the mock so tests can look at the requests. */
-export function fakeApi(handler: Handler) {
+export const ADVISOR: Me = { username: 'advisor', name: 'Test Advisor', role: 'ADVISOR' }
+export const TECH: Me = { username: 'tech', name: 'Test Tech', role: 'TECHNICIAN' }
+
+/**
+ * Replaces fetch; returns the mock so tests can look at the requests. Sign-in calls are answered
+ * here: signed in as [me] (an advisor by default; null = not signed in).
+ */
+export function fakeApi(handler: Handler, { me = ADVISOR }: { me?: Me | null } = {}) {
   const mock = vi.fn(async (url: string, init?: RequestInit) => {
-    const { status = 200, body } = handler(url, init)
+    const auth =
+      url === '/api/auth/me'
+        ? me
+          ? { status: 200, body: me }
+          : { status: 401, body: { detail: 'Please sign in to continue.' } }
+        : url === '/api/auth/csrf'
+          ? { status: 200, body: { headerName: 'X-XSRF-TOKEN', token: 'test-csrf' } }
+          : null
+    const { status = 200, body } = auth ?? handler(url, init)
+    if (status === 204) return new Response(null, { status })
     return new Response(JSON.stringify(body), {
       status,
       headers: { 'Content-Type': status < 400 ? 'application/json' : 'application/problem+json' },

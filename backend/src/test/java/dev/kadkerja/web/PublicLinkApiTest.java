@@ -3,6 +3,7 @@ package dev.kadkerja.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,6 +26,7 @@ import org.springframework.test.web.servlet.ResultActions;
 @SpringBootTest(
     properties = {"kadkerja.public.reads-per-minute=10000", "kadkerja.public.answers-per-minute=10000"})
 @AutoConfigureMockMvc
+@WithMockUser(roles = "ADVISOR")
 class PublicLinkApiTest {
   @Autowired MockMvc mvc;
   @Autowired JdbcTemplate jdbc;
@@ -37,7 +40,7 @@ class PublicLinkApiTest {
   }
 
   private ResultActions postJson(String url, String body) throws Exception {
-    return mvc.perform(post(url).contentType(MediaType.APPLICATION_JSON).content(body));
+    return mvc.perform(post(url).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body));
   }
 
   private record Job(long id, String token) {}
@@ -179,11 +182,12 @@ class PublicLinkApiTest {
         .andExpect(jsonPath("$.detail").value("This link is not valid or has expired."));
     mvc.perform(get("/api/public/jobs/short")).andExpect(status().isNotFound());
     mvc.perform(get("/api/public/jobs/" + j.token() + "x")).andExpect(status().isNotFound());
+    // Odd characters: refused before any controller (404 by the path rule or 400 by the firewall).
     mvc.perform(get("/api/public/jobs/" + j.token().substring(0, 23) + "%27"))
-        .andExpect(status().isNotFound());
+        .andExpect(status().is4xxClientError());
 
     String reset =
-        mvc.perform(post("/api/jobs/" + j.id() + "/link"))
+        mvc.perform(post("/api/jobs/" + j.id() + "/link").with(csrf()))
             .andExpect(status().isOk())
             .andReturn()
             .getResponse()

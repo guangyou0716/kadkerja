@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, ApiError, type JobCard, type LineKind } from '../api'
 import { buttonClass, ErrorNote, Field, inputClass, secondaryButtonClass, StatusBadge } from '../components'
+import { mayMove, useMe } from '../session'
 import { customerLink, whatsappText, whatsappUrl } from '../link'
 import { formatRm, parseRm } from '../money'
 import { MOVE_LABEL, STATUS_LABEL, type JobStatus } from '../status'
@@ -19,6 +20,7 @@ const when = (iso: string) =>
 
 export function JobPage() {
   const id = Number(useParams().id)
+  const me = useMe()
   const client = useQueryClient()
   const job = useQuery({ queryKey: ['job', id], queryFn: () => api.job(id), enabled: Number.isInteger(id) })
   // Every change returns the whole job card: show it at once and refresh the board.
@@ -66,7 +68,7 @@ export function JobPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="flex flex-col gap-4">
           <Moves job={j} onSaved={onSaved} />
-          <CustomerLink job={j} onSaved={onSaved} />
+          {me.role === 'ADVISOR' && <CustomerLink job={j} onSaved={onSaved} />}
         </div>
         <Timeline job={j} />
       </div>
@@ -227,6 +229,7 @@ function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void
 }
 
 function Moves({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }) {
+  const me = useMe()
   const [note, setNote] = useState('')
   const move = useMutation({
     mutationFn: (to: JobStatus) => api.move(job.id, to, note.trim()),
@@ -244,7 +247,14 @@ function Moves({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }
   }
   // Forward moves first, then going back to redo the quote, cancelling last.
   const rank = (s: JobStatus) => (s === 'CANCELLED' ? 2 : s === 'INSPECTING' && job.status === 'QUOTED' ? 1 : 0)
-  const ordered = [...job.next].sort((a, b) => rank(a) - rank(b))
+  const ordered = [...job.next].filter((to) => mayMove(me, job.status, to)).sort((a, b) => rank(a) - rank(b))
+  if (ordered.length === 0) {
+    return (
+      <section aria-label="Next step" className="rounded-lg bg-white p-4 shadow-sm">
+        <p className="text-sm text-slate-700">The next step is for the service advisor.</p>
+      </section>
+    )
+  }
   return (
     <section aria-labelledby="next-title" className="flex flex-col gap-3 rounded-lg bg-white p-4 shadow-sm">
       <h2 id="next-title" className="font-semibold text-slate-900">

@@ -99,16 +99,49 @@ export class ApiError extends Error {
   }
 }
 
+export type Role = 'ADVISOR' | 'TECHNICIAN'
+
+/** The signed-in staff member. */
+export interface Me {
+  username: string
+  name: string
+  role: Role
+}
+
+/** Fired when the server says the session is gone, so the app shows the sign-in form. */
+export const SIGNED_OUT_EVENT = 'kadkerja:signed-out'
+
+// CSRF: the server sets the XSRF-TOKEN cookie; every change sends it back as X-XSRF-TOKEN.
+// If the cookie is not there yet (first visit, or just after signing in), ask for one.
+let fetchedToken: string | null = null
+
+function cookieToken(): string | null {
+  const m = /(?:^|;\s*)XSRF-TOKEN=([^;]+)/.exec(document.cookie)
+  return m ? decodeURIComponent(m[1]) : null
+}
+
+async function csrfToken(): Promise<string> {
+  const fromCookie = cookieToken()
+  if (fromCookie) return fromCookie
+  if (!fetchedToken) fetchedToken = (await call<{ token: string }>('/api/auth/csrf')).token
+  return fetchedToken
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method ?? 'GET'
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
+  // The customer link has no session, so it needs no CSRF token.
+  if (method !== 'GET' && !path.startsWith('/api/public/')) headers['X-XSRF-TOKEN'] = await csrfToken()
   let res: Response
   try {
-    res = await fetch(path, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    })
+    res = await fetch(path, { ...init, headers, credentials: 'same-origin' })
   } catch {
     throw new ApiError(0, 'Cannot reach the server. Check that it is running.')
   }
+  if (res.status === 401 && !path.startsWith('/api/auth/') && !path.startsWith('/api/public/')) {
+    window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
+  }
+  if (res.status === 204) return undefined as T
   if (res.ok) return (await res.json()) as T
   let body: { detail?: string; fields?: Record<string, string> } = {}
   try {
@@ -122,7 +155,16 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: unknown) =>
   call<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
+/** Signing in or out changes the CSRF token: forget the one we fetched. */
+const freshSession = <T>(p: Promise<T>) =>
+  p.finally(() => {
+    fetchedToken = null
+  })
+
 export const api = {
+  me: () => call<Me>('/api/auth/me'),
+  login: (username: string, password: string) => freshSession(post<Me>('/api/auth/login', { username, password })),
+  logout: () => freshSession(post<void>('/api/auth/logout', {})),
   jobs: () => call<JobSummary[]>('/api/jobs'),
   job: (id: number) => call<JobCard>(`/api/jobs/${id}`),
   checkIn: (body: CheckIn) => post<JobCard>('/api/jobs', body),
