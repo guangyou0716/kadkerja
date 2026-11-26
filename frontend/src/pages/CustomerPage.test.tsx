@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { fakeApi, publicJob, renderAt } from '../test/render'
@@ -113,4 +113,38 @@ describe('CustomerPage refresh while confirming', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
     vi.useRealTimers()
   })
+
+  it('shows the workshop photos by their key through this link, and none when there are none', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi((url) =>
+      url.includes('/photos/')
+        ? { body: {} }
+        : {
+            body: publicJob({
+              photos: [
+                { key: 'KeyKeyKeyKeyKey1', stage: 'BEFORE', caption: 'Worn pads' },
+                { key: 'KeyKeyKeyKeyKey2', stage: 'AFTER', caption: null },
+              ],
+            }),
+          },
+    )
+    const first = renderAt(`/t/${TOKEN}`)
+    const before = await screen.findByRole('list', { name: 'Before the repair' })
+    expect(within(before).getAllByRole('button')).toHaveLength(1)
+    expect(screen.getByRole('list', { name: 'After the repair' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(api.mock.calls.some(([u]) => u === `/api/public/jobs/${TOKEN}/photos/KeyKeyKeyKeyKey1`)).toBe(true),
+    )
+    await user.click(screen.getByRole('button', { name: 'Open photo 1: Worn pads' }))
+    expect(screen.getByRole('dialog', { name: 'Before the repair' })).toHaveTextContent('Worn pads')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    first.unmount()
+
+    fakeApi(() => ({ body: publicJob() }))
+    renderAt(`/t/${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your quote is ready' })
+    expect(screen.queryByRole('heading', { name: 'Photos from the workshop' })).not.toBeInTheDocument()
+  })
 })
+

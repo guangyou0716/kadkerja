@@ -3,7 +3,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { vi } from 'vitest'
 import { AppRoutes } from '../App'
-import type { JobCard, Me, Part, PublicJob, StaffMember } from '../api'
+import type { JobCard, Me, Part, Photo, PublicJob, StaffMember } from '../api'
 
 /** The app at [path] with a fresh cache (no retries, so errors show at once). */
 export function renderAt(path: string) {
@@ -35,13 +35,18 @@ export const PARTS: Part[] = [
 ]
 
 /**
- * Replaces fetch; returns the mock so tests can look at the requests. Sign-in calls and the staff
+ * Replaces fetch (photos of a job: [photos], or null to let [handler] answer); returns the mock so tests can look at the requests. Sign-in calls and the staff
  * list (GET /api/staff) are answered here: signed in as [me] (an advisor by default; null = not
  * signed in).
  */
 export function fakeApi(
   handler: Handler,
-  { me = ADVISOR, staff = STAFF, parts = PARTS }: { me?: Me | null; staff?: StaffMember[]; parts?: Part[] } = {},
+  {
+    me = ADVISOR,
+    staff = STAFF,
+    parts = PARTS,
+    photos = [],
+  }: { me?: Me | null; staff?: StaffMember[]; parts?: Part[]; photos?: Photo[] | null } = {},
 ) {
   const mock = vi.fn(async (url: string, init?: RequestInit) => {
     const auth =
@@ -49,6 +54,8 @@ export function fakeApi(
         ? { status: 200, body: staff }
         : url === '/api/parts' && (init?.method ?? 'GET') === 'GET'
         ? { status: 200, body: parts }
+        : /^\/api\/jobs\/\d+\/photos$/.test(url) && (init?.method ?? 'GET') === 'GET' && photos
+        ? { status: 200, body: photos }
         : url === '/api/auth/me'
         ? me
           ? { status: 200, body: me }
@@ -122,6 +129,7 @@ export function publicJob(over: Partial<PublicJob> = {}): PublicJob {
       { status: 'INSPECTING', at: '2026-11-26T02:10:00Z', by: 'STAFF' },
       { status: 'QUOTED', at: '2026-11-26T03:00:00Z', by: 'STAFF' },
     ],
+    photos: [],
     ...over,
   }
 }

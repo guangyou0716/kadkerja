@@ -7,6 +7,7 @@ import { mayMove, mayWorkOn, useMe } from '../session'
 import { customerLink, whatsappText, whatsappUrl } from '../link'
 import { formatRm, parseRm } from '../money'
 import { MOVE_LABEL, STATUS_LABEL, type JobStatus } from '../status'
+import { JobPhotos } from './JobPhotos'
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString('en-MY', {
@@ -87,6 +88,7 @@ export function JobPage() {
         </div>
         <Timeline job={j} />
       </div>
+      <JobPhotos job={j} canEdit={mine} />
     </article>
   )
 }

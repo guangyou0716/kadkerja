@@ -64,11 +64,11 @@ describe('browser demo (whole app on the in-browser backend)', () => {
   it('throws away a saved demo from an older version or a damaged save and starts again', async () => {
     const old = { version: 1, seq: 0, signedIn: 'advisor', customers: [], vehicles: [], jobs: [] }
     const v2 = { ...old, version: 2, staff: [{ id: 1, username: 'advisor', name: 'Farah Demo', role: 'ADVISOR', active: true }] }
-    for (const saved of [JSON.stringify(old), JSON.stringify(v2), JSON.stringify({ ...old, version: 3 }), JSON.stringify({ ...v2, version: 4 }), '{not json']) {
+    for (const saved of [JSON.stringify(old), JSON.stringify(v2), JSON.stringify({ ...old, version: 3 }), JSON.stringify({ ...v2, version: 4 }), JSON.stringify({ ...v2, version: 5 }), '{not json']) {
       window.localStorage.setItem(STORAGE_KEY, saved)
       expect((await fetch('/api/auth/me')).status).toBe(401)
       const state = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)
-      expect(state.version).toBe(4)
+      expect(state.version).toBe(5)
       expect(state.jobs).toHaveLength(5)
       expect(state.staff.map((s: { username: string }) => s.username)).toEqual(['advisor', 'tech'])
     }
@@ -106,4 +106,42 @@ describe('browser demo (whole app on the in-browser backend)', () => {
     expect((await fetch('/api/auth/me')).status).toBe(401)
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!).jobs[3].status).toBe('RECEIVED')
   })
+
+  it('uploads a photo through the app, shows it from browser storage, and survives full storage', async () => {
+    const png = Uint8Array.from(
+      atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='),
+      (c) => c.charCodeAt(0),
+    )
+    await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: 'advisor', password: 'demo-kadkerja' }) })
+    const form = new FormData()
+    form.append('stage', 'BEFORE')
+    form.append('file', new Blob([png], { type: 'image/png' }), 'photo.jpg')
+    const added = await fetch('/api/jobs/2/photos', { method: 'POST', body: form })
+    expect(added.status).toBe(201)
+    const { id } = (await added.json()) as { id: number }
+    const image = await fetch(`/api/jobs/2/photos/${id}`)
+    expect(image.headers.get('Content-Type')).toBe('image/png')
+    expect(new Uint8Array(await image.arrayBuffer())).toEqual(png)
+
+    // A full browser storage: refused, and nothing changed.
+    const before = window.localStorage.getItem(STORAGE_KEY)
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = () => {
+      throw new DOMException('full', 'QuotaExceededError')
+    }
+    try {
+      const again = new FormData()
+      again.append('stage', 'BEFORE')
+      again.append('file', new Blob([png], { type: 'image/png' }))
+      const refused = await fetch('/api/jobs/2/photos', { method: 'POST', body: again })
+      expect(refused.status).toBe(413)
+      expect(((await refused.json()) as { fields: { file: string } }).fields.file).toMatch(/storage for this demo is full/)
+    } finally {
+      Storage.prototype.setItem = setItem
+    }
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(before)
+    const list = (await (await fetch('/api/jobs/2/photos')).json()) as unknown[]
+    expect(list).toHaveLength(1)
+  })
 })
+

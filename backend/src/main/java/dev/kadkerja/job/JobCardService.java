@@ -4,6 +4,7 @@ import dev.kadkerja.staff.Role;
 import dev.kadkerja.staff.StaffUser;
 import dev.kadkerja.staff.StaffUserRepository;
 import dev.kadkerja.staff.Who;
+import dev.kadkerja.photo.JobPhotoRepository;
 import dev.kadkerja.stock.StockService;
 import java.time.Clock;
 import java.util.List;
@@ -20,6 +21,7 @@ public class JobCardService {
   private final JobCardRepository jobs;
   private final StaffUserRepository staff;
   private final StockService stock;
+  private final JobPhotoRepository photos;
   private final Clock clock;
   private final int sstRatePercent;
   private final String workshopName;
@@ -30,6 +32,7 @@ public class JobCardService {
       JobCardRepository jobs,
       StaffUserRepository staff,
       StockService stock,
+      JobPhotoRepository photos,
       Clock clock,
       @Value("${kadkerja.sst-rate-percent:8}") int sstRatePercent,
       @Value("${kadkerja.workshop-name:Demo Auto Workshop}") String workshopName) {
@@ -38,6 +41,7 @@ public class JobCardService {
     this.jobs = jobs;
     this.staff = staff;
     this.stock = stock;
+    this.photos = photos;
     this.clock = clock;
     this.sstRatePercent = sstRatePercent;
     this.workshopName = workshopName;
@@ -118,6 +122,16 @@ public class JobCardService {
   private JobCard find(long id) {
     return jobs.findById(id)
         .orElseThrow(() -> new NotFoundException("There is no job card " + id + "."));
+  }
+
+  /**
+   * The job card for a change by [who], inside the caller's transaction: not found, or a
+   * technician's change to someone else's job, are refused here.
+   */
+  public JobCard jobToChange(long id, Who who) {
+    JobCard job = find(id);
+    requireMayWorkOn(job, who);
+    return job;
   }
 
   @Transactional(readOnly = true)
@@ -249,6 +263,10 @@ public class JobCardService {
    * The job behind a customer link. Unknown tokens and links that have run out look the same
    * (not found), so the answer says nothing about which tokens exist.
    */
+  public JobCard jobForLink(String token) {
+    return byToken(token);
+  }
+
   private JobCard byToken(String token) {
     return jobs.findByPublicToken(token)
         .filter(j -> j.linkOpen(clock.instant()))
@@ -257,7 +275,8 @@ public class JobCardService {
 
   @Transactional(readOnly = true)
   public PublicJobView publicView(String token) {
-    return PublicJobView.of(byToken(token), sstRatePercent, workshopName);
+    JobCard job = byToken(token);
+    return PublicJobView.of(job, sstRatePercent, workshopName, photos.infos(job.getId()));
   }
 
   public PublicJobView answer(String token, Decision decision, int seenVersion, String note) {
@@ -267,6 +286,7 @@ public class JobCardService {
     if (decision == Decision.APPROVE) {
       stock.takeForApprovedQuote(job, null);
     }
-    return PublicJobView.of(jobs.saveAndFlush(job), sstRatePercent, workshopName);
+    JobCard saved = jobs.saveAndFlush(job);
+    return PublicJobView.of(saved, sstRatePercent, workshopName, photos.infos(saved.getId()));
   }
 }

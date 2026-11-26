@@ -23,7 +23,8 @@ public record PublicJobView(
     long totalSen,
     int sstRatePercent,
     boolean canAnswer,
-    List<Step> timeline) {
+    List<Step> timeline,
+    List<Photo> photos) {
 
   public record Line(
       LineKind kind,
@@ -36,7 +37,11 @@ public record PublicJobView(
 
   public record Step(JobStatus status, Instant at, Actor by) {}
 
-  public static PublicJobView of(JobCard j, int rate, String workshop) {
+  /** A photo for the customer: its random key (no internal id), stage and caption. */
+  public record Photo(String key, dev.kadkerja.photo.PhotoStage stage, String caption) {}
+
+  public static PublicJobView of(
+      JobCard j, int rate, String workshop, List<dev.kadkerja.photo.PhotoInfo> photos) {
     var v = j.getVehicle();
     boolean quote = j.quoteVisibleToCustomer();
     return new PublicJobView(
@@ -68,6 +73,7 @@ public record PublicJobView(
         quote ? j.totalSen(rate) : 0,
         rate,
         j.getStatus() == JobStatus.QUOTED,
-        j.getEvents().stream().map(e -> new Step(e.getTo(), e.getAt(), e.getActor())).toList());
+        j.getEvents().stream().map(e -> new Step(e.getTo(), e.getAt(), e.getActor())).toList(),
+        photos.stream().map(p -> new Photo(p.publicKey(), p.stage(), p.caption())).toList());
   }
 }

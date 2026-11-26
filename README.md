@@ -6,9 +6,9 @@
 the front desk writes down the complaint, the mechanic finds the problem, someone phones the customer with a
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
-Status: **work in progress** (increments 1-4 of 6 and the parts half of 5: the API, the staff web app, the
-customer's progress link, staff sign-in with roles, technician assignment, "My jobs", staff management, and a
-parts shelf that is counted down when a quote is approved). Plan in [Roadmap](#roadmap).
+Status: **work in progress** (increments 1-5 of 6: the API, the staff web app, the customer's progress link,
+staff sign-in with roles, technician assignment, "My jobs", staff management, a parts shelf that is counted down
+when a quote is approved, and before/after photos on each job card). Plan in [Roadmap](#roadmap).
 
 **Try it: [kadkerja-demo.guangyou.workers.dev](https://kadkerja-demo.guangyou.workers.dev)** (browser-only demo).
 Sign in as `advisor` (service advisor) or `tech` (technician), password `demo-kadkerja`. Open the quoted job
@@ -152,6 +152,34 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
   <img src="docs/quote-from-stock.png" alt="Job card being inspected: a quote line marked 'stock BP-MYV-F' and the From stock picker filling in engine oil at RM 115.00" width="560">
 </p>
 
+### Before and after photos
+
+- **On the job card**: staff add *before* photos (the damage, the worn part) at any point and *after* photos
+  once the repair has started, each with an optional caption. Tap one to see it large, with who added it and
+  when. A technician adds and removes photos only on their own or an unassigned car; a collected or cancelled
+  job's photos no longer change. At most 12 photos per job card.
+- **On the customer's link**: the customer sees the same photos under *Photos from the workshop*, so a quote
+  for new brake pads comes with a picture of the old ones.
+- **Small and clean**: the browser shrinks a phone photo before sending it. The server then accepts only real
+  JPEG or PNG bytes (it looks at the bytes, not the file name or type), refuses anything over 4 MB or 50 million
+  pixels before decoding it, decodes a big photo at a fraction of its size (so one upload stays within about
+  40 MB of memory), and stores a new JPEG of at most 1600 px. Camera metadata (location, phone model) is not
+  copied into it.
+- **Stored in the database**, not in files, so there are no paths to escape from. Images are sent with
+  `Content-Security-Policy: default-src 'none'; sandbox` and `nosniff`. The customer's link reaches a photo by a
+  random 16-character key that only works with that job's link; staff URLs use ids and need a session.
+- Two uploads at the same moment cannot take a job past 12 (the job card's version is bumped on every upload,
+  tested with uploads racing for the last place).
+- Known gap: the browser turns a phone photo upright while shrinking it; a photo that reaches the server
+  unshrunk (an old browser, or a direct API call) keeps its pixels as stored, so a sideways camera photo stays
+  sideways.
+- In the browser demo photos stay in localStorage, so they are limited to about 450 KB each and 1.5 MB in all.
+
+<p>
+  <img src="docs/job-photos.png" alt="Job card with a before photo opened large: a synthetic picture of a red car with a dent, caption 'Front pads worn to 2 mm', added by Farah Demo, and a Remove photo button" width="560">
+  <img src="docs/customer-photos.png" alt="Customer's phone: 'Your quote is ready' for PKR 1234 with a 'Photos from the workshop' section showing the before photo above the quote" width="240">
+</p>
+
 ### API (Spring Boot)
 
 
@@ -198,6 +226,10 @@ Everything under `/api/jobs`, `/api/parts` and `/api/staff` needs a signed-in se
 | `POST` | `/api/jobs/{id}/moves` | Move the job `{to, note?}` |
 | `POST` | `/api/jobs/{id}/link` | Make a new customer link (the old one stops working) |
 | `PUT` | `/api/jobs/{id}/assignee` | Advisor: give the job to a technician `{staffId}` (`null` = nobody) |
+| `GET` | `/api/jobs/{id}/photos` | Photos of the job (id, stage, size, caption, who, when) |
+| `POST` | `/api/jobs/{id}/photos` | Add a photo: `multipart/form-data` with `stage` (BEFORE/AFTER), `file` (JPEG or PNG, at most 4 MB), `caption?` |
+| `GET` | `/api/jobs/{id}/photos/{photoId}` | The stored JPEG |
+| `DELETE` | `/api/jobs/{id}/photos/{photoId}` | Remove a photo (`204`) |
 | `GET` | `/api/parts` | The parts shelf (part number, name, price, on hand, reorder level, low) |
 | `POST` | `/api/parts` | Advisor: add a part `{sku, name, unitPriceSen, onHand, reorderLevel}` |
 | `POST` | `/api/parts/{id}/receive` | Advisor: a delivery arrived `{quantity}` |
@@ -210,6 +242,7 @@ Everything under `/api/jobs`, `/api/parts` and `/api/staff` needs a signed-in se
 | `POST` | `/api/staff/{id}/password` | Advisor: set a new password for someone else `{password}` (ends their sessions) |
 | `POST` | `/api/auth/password` | Change my own password `{currentPassword, newPassword}` (`204`; other sessions end) |
 | `GET` | `/api/public/jobs/{token}` | Customer view: progress, sent quote, whether it can be answered |
+| `GET` | `/api/public/jobs/{token}/photos/{key}` | Customer: one photo of this job, by its random key |
 | `POST` | `/api/public/jobs/{token}/answer` | Customer answer `{decision: APPROVE/DECLINE, quoteVersion, note?}` |
 
 ```bash
@@ -257,7 +290,7 @@ the schema.
   live in one file (`frontend/src/status.ts`); the allowed moves always come from the server.
 - The rules live in the domain (`JobStatus`, `JobCard`): every change goes through methods that check them, so
   no caller can skip a step. Views are built inside the service transaction (`open-in-view` is off).
-- Backend tests (81): every one of the 81 status pairs is checked against an independent table, every status is
+- Backend tests (98): every one of the 81 status pairs is checked against an independent table, every status is
   reachable and none is a dead end; 2,000 random quotes add up exactly (lines, tax, total) and per-line tax is
   never more than half a sen off; the whole flow through the HTTP API with MockMvc; refused moves and edits
   change nothing; field-by-field validation; plate reuse, owner changes and the one-open-job rule; the token never leaks; demo
@@ -282,8 +315,14 @@ the schema.
   history; a part only on a part line; approval by the customer or the advisor counts down once (several lines of
   one part added up), declined, cancelled and redone quotes take nothing, a short shelf goes below zero, the
   customer view shows no part ids, six approvals at the same moment lose no count (fails without the row lock),
-  and old quote lines migrate with no part.
-- Frontend tests (98, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+  and old quote lines migrate with no part. Photos (synthetic images made in the test): a large photo comes back
+  as a JPEG of at most 1600 px with the same shape, camera metadata is dropped, transparent areas turn white, an SVG
+  or a PNG sent as `photo.jpg` / `image/jpeg` is judged by its bytes (the SVG refused, the PNG stored as JPEG), no CSRF token is refused, a header claiming a huge picture is refused
+  before decoding, a big photo is decoded subsampled, a request over 4 MB gets `413`; after photos only once the repair started, finished jobs locked,
+  technicians only on their own or unassigned cars, 12 at most (also with uploads racing for the last place;
+  fails without the version bump), a photo only through its own job, and the customer only by key on their own
+  link.
+- Frontend tests (113, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
@@ -298,9 +337,13 @@ the schema.
   field, hidden from technicians) and *My password* (repeat checked before sending, wrong current password); the Parts
   page (to-order and low marks, read-only for technicians, history linking to the job, receive and stocktake with
   checks before sending, add with a taken part number on the field) and *From stock* on the quote form (fills the
-  line, sends the part id, labour drops it). Price parsing round-trips every formatted amount.
+  line, sends the part id, labour drops it). Photos: before and after shown apart, the large view with caption and
+  who, removing only after confirming, the upload as multipart with stage, caption and the CSRF header, a file
+  that is not a JPEG or PNG refused before sending, after photos offered only once the repair started, no upload
+  form on finished jobs, someone else's car or a full card; the customer's photos. Price parsing round-trips every formatted amount.
   Browser demo: the in-browser stand-in's sign-in, seed totals, the whole check-in -> quote -> customer approval
-  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, the parts shelf and its count-down on approval, form checks, what the customer link hides,
+  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, the parts shelf and its count-down on approval, photos (the same rules as the server, the storage limits, a
+  full browser storage refused with nothing changed), form checks, what the customer link hides,
   new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
@@ -312,7 +355,7 @@ the schema.
 3. ✅ Customer progress link (no login): timeline, quote, approve/decline with a stale-quote guard, WhatsApp text.
 4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs", staff
    management (add, deactivate/reactivate, set and change passwords; sessions end when an account changes).
-5. Parts stock deducted on approval (✅), before/after photos per job card (next).
+5. ✅ Parts stock deducted on approval, before/after photos per job card.
 6. Bahasa Melayu and 简体中文, accessibility pass, Docker Compose, Playwright end-to-end tests, demo GIF.
 
 ## Privacy
