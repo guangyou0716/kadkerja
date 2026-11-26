@@ -69,7 +69,7 @@ public class JobCardService {
 
   private Vehicle reuse(Vehicle v, CheckIn in) {
     Customer owner = v.getOwner();
-    if (owner.getPhone().equals(in.phone())) {
+    if (digits(owner.getPhone()).equals(digits(in.phone()))) {
       owner.update(in.customerName(), in.phone());
     } else {
       v.changeOwner(customers.save(new Customer(in.customerName(), in.phone())));
@@ -80,6 +80,11 @@ public class JobCardService {
   // Views are built inside the transaction (no open session in the view layer).
   private JobCardView view(JobCard job) {
     return JobCardView.of(job, sstRatePercent);
+  }
+
+  /** "012-345 6789" and "0123456789" are the same number. */
+  static String digits(String phone) {
+    return phone.replaceAll("[^0-9]", "");
   }
 
   @Transactional(readOnly = true)

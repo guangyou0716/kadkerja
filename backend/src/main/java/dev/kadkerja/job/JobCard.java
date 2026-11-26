@@ -41,6 +41,11 @@ public class JobCard {
   @JoinColumn(name = "vehicle_id")
   private Vehicle vehicle;
 
+  /** Who brought the car in this time (kept even if the car later changes owner). */
+  @ManyToOne(optional = false, fetch = FetchType.LAZY)
+  @JoinColumn(name = "customer_id")
+  private Customer customer;
+
   @Column(nullable = false, length = 1000)
   private String complaint;
 
@@ -74,6 +79,7 @@ public class JobCard {
 
   public JobCard(Vehicle vehicle, String complaint, Integer mileageKm, Instant now) {
     this.vehicle = vehicle;
+    this.customer = vehicle.getOwner();
     this.complaint = complaint;
     this.mileageKm = mileageKm;
     this.status = JobStatus.RECEIVED;
@@ -151,6 +157,10 @@ public class JobCard {
 
   public Vehicle getVehicle() {
     return vehicle;
+  }
+
+  public Customer getCustomer() {
+    return customer;
   }
 
   public String getComplaint() {

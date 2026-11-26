@@ -181,9 +181,59 @@ class JobCardApiTest {
             .getContentAsString();
     long vehicleId = ((Number) JsonPath.read(body, "$.vehicle.id")).longValue();
     mvc.perform(get("/api/jobs/" + first))
-        .andExpect(jsonPath("$.vehicle.id").value(vehicleId));
+        .andExpect(jsonPath("$.vehicle.id").value(vehicleId))
+        .andExpect(jsonPath("$.customer.name").value("Test Owner"));
     org.assertj.core.api.Assertions.assertThat((String) JsonPath.read(body, "$.customer.name"))
         .isEqualTo("New Owner");
+  }
+
+  private static long id(String json, String path) {
+    return ((Number) JsonPath.read(json, path)).longValue();
+  }
+
+  private String body(ResultActions r) throws Exception {
+    return r.andReturn().getResponse().getContentAsString();
+  }
+
+  @Test
+  void theSamePhoneTypedDifferentlyIsTheSameOwner() throws Exception {
+    long first = checkIn("PKR 10");
+    long owner = id(body(mvc.perform(get("/api/jobs/" + first))), "$.customer.id");
+    move(first, "CANCELLED");
+    String second =
+        body(
+            postJson(
+                    "/api/jobs",
+                    """
+                    {"customerName":"Test Owner Renamed","phone":"0120000009","plate":"PKR10",
+                     "make":"Perodua","model":"Bezza","complaint":"Service"}
+                    """)
+                .andExpect(status().isCreated()));
+    org.assertj.core.api.Assertions.assertThat(id(second, "$.customer.id")).isEqualTo(owner);
+    org.assertj.core.api.Assertions.assertThat((String) JsonPath.read(second, "$.customer.name"))
+        .isEqualTo("Test Owner Renamed");
+  }
+
+  @Test
+  void anOldJobCardKeepsTheCustomerWhoBroughtTheCar() throws Exception {
+    long first = checkIn("PKR 11");
+    move(first, "CANCELLED");
+    String second =
+        body(
+            postJson(
+                "/api/jobs",
+                """
+                {"customerName":"Next Owner","phone":"019-0000007","plate":"PKR 11",
+                 "make":"Perodua","model":"Bezza","complaint":"Service"}
+                """));
+    String old = body(mvc.perform(get("/api/jobs/" + first)));
+    org.assertj.core.api.Assertions.assertThat((String) JsonPath.read(old, "$.customer.name"))
+        .isEqualTo("Test Owner");
+    org.assertj.core.api.Assertions.assertThat(id(second, "$.vehicle.id"))
+        .isEqualTo(id(old, "$.vehicle.id"));
+    org.assertj.core.api.Assertions.assertThat(id(second, "$.customer.id"))
+        .isNotEqualTo(id(old, "$.customer.id"));
+    mvc.perform(get("/api/jobs?status=CANCELLED")).andExpect(jsonPath("$[0].customer").value("Test Owner"));
   }
 
   @Test
@@ -211,6 +261,7 @@ class JobCardApiTest {
         .andExpect(jsonPath("$.fields.quantity").exists())
         .andExpect(jsonPath("$.fields.unitPriceSen").exists());
     postJson("/api/jobs/" + id + "/moves", "{\"to\":\"FLYING\"}").andExpect(status().isBadRequest());
+    postJson("/api/jobs", "{not json").andExpect(status().isBadRequest());
     mvc.perform(get("/api/jobs")).andExpect(jsonPath("$", hasSize(1)));
   }
 

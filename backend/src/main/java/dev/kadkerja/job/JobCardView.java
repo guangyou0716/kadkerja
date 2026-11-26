@@ -41,7 +41,7 @@ public record JobCardView(
 
   public static JobCardView of(JobCard j, int rate) {
     var v = j.getVehicle();
-    var c = v.getOwner();
+    var c = j.getCustomer();
     return new JobCardView(
         j.getId(),
         j.number(),

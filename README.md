@@ -12,7 +12,8 @@ Status: **work in progress** (increment 1 of 6: the backend API). Plan in [Roadm
 
 - **Check-in**: customer, car and complaint in one request. Plates are normalised however they are typed
   (`pkr1234`, `PKR  1234` -> `PKR 1234`), a known plate reuses the car, a different phone number means the car
-  has a new owner, and a car can only have one open job card at a time.
+  has a new owner (phone numbers compare by digits, so `012-345 6789` = `0123456789`), an old job card keeps
+  the customer who brought the car that time, and a car can only have one open job card at a time.
 - **Job card flow, enforced on the server**:
 
   ```
@@ -70,10 +71,10 @@ the schema.
 - Java 21, Spring Boot 4.2 (Spring MVC, Data JPA, Bean Validation, Flyway), PostgreSQL 17 / H2.
 - The rules live in the domain (`JobStatus`, `JobCard`): every change goes through methods that check them, so
   no caller can skip a step. Views are built inside the service transaction (`open-in-view` is off).
-- Tests (20): every one of the 81 status pairs is checked against an independent table, every status is
+- Tests (22): every one of the 81 status pairs is checked against an independent table, every status is
   reachable and none is a dead end; 2,000 random quotes add up exactly (lines, tax, total) and per-line tax is
   never more than half a sen off; the whole flow through the HTTP API with MockMvc; refused moves and edits
-  change nothing; field-by-field validation; plate reuse and the one-open-job rule; the token never leaks; demo
+  change nothing; field-by-field validation; plate reuse, owner changes and the one-open-job rule; the token never leaks; demo
   data seeds once.
 - GitHub Actions runs the tests twice on every push and pull request: on H2 and on a real PostgreSQL 17 service
   (Flyway migration + API tests).

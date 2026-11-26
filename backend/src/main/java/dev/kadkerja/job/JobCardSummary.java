@@ -21,7 +21,7 @@ public record JobCardSummary(
         j.getStatus(),
         v.getPlate(),
         v.getMake() + " " + v.getModel(),
-        v.getOwner().getName(),
+        j.getCustomer().getName(),
         j.getComplaint(),
         j.getCreatedAt());
   }

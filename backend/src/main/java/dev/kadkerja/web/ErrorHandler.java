@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -29,8 +30,12 @@ public class ErrorHandler extends ResponseEntityExceptionHandler {
     return problem(HttpStatus.NOT_FOUND, "Not found", e.getMessage());
   }
 
-  @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-  ProblemDetail stale(ObjectOptimisticLockingFailureException e) {
+  /** Two changes at the same moment (a version check or a unique plate written twice). */
+  @ExceptionHandler({
+    ObjectOptimisticLockingFailureException.class,
+    DataIntegrityViolationException.class
+  })
+  ProblemDetail stale(RuntimeException e) {
     return problem(
         HttpStatus.CONFLICT,
         "Changed by someone else",
