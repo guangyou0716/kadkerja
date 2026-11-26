@@ -75,3 +75,34 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  compose:
+    name: docker compose (PostgreSQL + API + web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KADKERJA_PROFILES: postgres,demo
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose config --quiet
+      - name: Build and start the stack
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Smoke test through nginx
+        run: scripts/compose-smoke.sh http://localhost:8081
+      - name: Restart keeps the data (PostgreSQL volume, demo data not added twice)
+        run: |
+          q() { docker compose exec -T db psql -U kadkerja -d kadkerja -tAc "$1"; }
+          before=$(q "select count(*) from job_card")
+          docker compose restart backend
+          docker compose up -d --wait --wait-timeout 180
+          sleep 5
+          after=$(q "select count(*) from job_card")
+          echo "job cards before restart: $before, after: $after"
+          test "$before" -gt 0
+          test "$before" = "$after"
+          test "$(q "select count(*) from flyway_schema_history where success")" -ge 7
+      - name: Logs
+        if: failure()
+        run: docker compose logs --no-color
+      - run: docker compose down -v
+        if: always()
