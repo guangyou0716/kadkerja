@@ -9,7 +9,7 @@ function load(storage: Storage): DemoBackend {
     try {
       const state = JSON.parse(saved) as DemoState
       // An older or damaged save is not patched up: the demo starts again from the seed.
-      if (state?.version === 2 && [state.staff, state.jobs, state.vehicles, state.customers].every(Array.isArray)) {
+      if (state?.version === 3 && [state.staff, state.jobs, state.vehicles, state.customers].every(Array.isArray)) {
         return new DemoBackend(state)
       }
     } catch {

@@ -7,7 +7,7 @@
  * It is NOT security: everything lives in the visitor's own browser. The real server does sign-in,
  * CSRF, rate limits and link expiry; here they are skipped or simplified.
  */
-import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, PublicJob, StaffMember } from '../api'
+import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, PublicJob, Role, StaffMember } from '../api'
 import { STATUSES, type JobStatus } from '../status'
 
 /** Published demo sign-ins (same as the server's demo profile). */
@@ -16,6 +16,14 @@ export const DEMO_STAFF: StaffMember[] = [
   { id: 1, username: 'advisor', name: 'Farah Demo', role: 'ADVISOR', active: true },
   { id: 2, username: 'tech', name: 'Hafiz Demo', role: 'TECHNICIAN', active: true },
 ]
+
+/**
+ * A member of staff in the demo. The password is kept as typed: it only ever lives in this
+ * visitor's own browser storage (the real server stores bcrypt hashes only).
+ */
+interface DemoStaff extends StaffMember {
+  password: string
+}
 const WORKSHOP = 'Demo Auto Workshop (browser demo)'
 const SST_RATE = 8
 
@@ -65,11 +73,11 @@ interface Customer {
 
 /** Everything the demo remembers (saved as JSON in localStorage). */
 export interface DemoState {
-  /** 2 added staff and technician assignment; older saved demos are thrown away and seeded again. */
-  version: 2
+  /** 3 added staff management (2 added assignment); older saved demos are thrown away and seeded again. */
+  version: 3
   seq: number
   signedIn: string | null
-  staff: StaffMember[]
+  staff: DemoStaff[]
   customers: Customer[]
   vehicles: Vehicle[]
   jobs: Job[]
@@ -96,6 +104,14 @@ const quoteEditable = (s: JobStatus) => s === 'RECEIVED' || s === 'INSPECTING'
 /** The front desk itself (seed data). */
 const FRONT_DESK: Me = { id: 0, username: '', name: '', role: 'ADVISOR' }
 const asMe = (s: StaffMember): Me => ({ id: s.id, username: s.username, name: s.name, role: s.role })
+/** Never the password. */
+const asStaffMember = (s: StaffMember): StaffMember => ({ id: s.id, username: s.username, name: s.name, role: s.role, active: s.active })
+
+/** Same limits as the server: 12 characters to 72 bytes (bcrypt reads no more). */
+function checkPassword(field: string, password: string) {
+  if (password.length < 12) throw new Problem(400, 'Some fields need fixing.', { [field]: 'use at least 12 characters' })
+  if (new TextEncoder().encode(password).length > 72) throw new Problem(400, 'Some fields need fixing.', { [field]: 'use at most 72 bytes (about 72 letters)' })
+}
 
 class Problem extends Error {
   readonly status: number
@@ -137,7 +153,7 @@ export class DemoBackend {
   /** A fresh demo workshop: two staff, five cars at different steps. Names and numbers are made up. */
   static seeded(now: () => Date = () => new Date()): DemoBackend {
     const b = new DemoBackend(
-      { version: 2, seq: 0, signedIn: null, staff: DEMO_STAFF.map((s) => ({ ...s })), customers: [], vehicles: [], jobs: [] },
+      { version: 3, seq: 0, signedIn: null, staff: DEMO_STAFF.map((s) => ({ ...s, password: DEMO_PASSWORD })), customers: [], vehicles: [], jobs: [] },
       now,
     )
     const ago = (minutes: number) => new Date(now().getTime() - minutes * 60_000).toISOString()
@@ -227,9 +243,16 @@ export class DemoBackend {
       this.state.signedIn = null
       return { status: 204 }
     }
-    if (method === 'GET' && path === '/api/staff') {
+    if (method === 'POST' && path === '/api/auth/password') {
+      this.changeOwnPassword(me, body)
+      return { status: 204 }
+    }
+    if (path === '/api/staff' || path.startsWith('/api/staff/')) {
       if (me.role !== 'ADVISOR') throw new Problem(403, 'Your role cannot do this, or the page is out of date (reload and try again).')
-      return { status: 200, body: this.staffList() }
+      if (method === 'GET' && path === '/api/staff') return { status: 200, body: this.staffList() }
+      if (method === 'POST' && path === '/api/staff') return { status: 201, body: this.addStaff(body) }
+      const sm = /^\/api\/staff\/(\d+)\/(deactivate|activate|password)$/.exec(path)
+      if (sm && method === 'POST') return { status: 200, body: this.staffAction(me, Number(sm[1]), sm[2], body) }
     }
     if (path === '/api/jobs') {
       if (method === 'GET') return { status: 200, body: this.list(query.get('mine') === 'true' ? me.id : undefined) }
@@ -273,7 +296,7 @@ export class DemoBackend {
   private login(username: string, password: string): Me {
     const user = this.state.staff.find((s) => s.username === username.trim().toLowerCase())
     // Same answer for unknown user, wrong password and a deactivated account (as on the server).
-    if (!user || !user.active || password !== DEMO_PASSWORD) throw new Problem(401, 'Wrong username or password.')
+    if (!user || !user.active || password !== user.password) throw new Problem(401, 'Wrong username or password.')
     this.state.signedIn = user.username
     return asMe(user)
   }
@@ -288,7 +311,58 @@ export class DemoBackend {
   private staffList(): StaffMember[] {
     return [...this.state.staff]
       .sort((a, b) => Number(b.active) - Number(a.active) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-      .map((s) => ({ ...s }))
+      .map(asStaffMember)
+  }
+
+  private addStaff(b: Record<string, unknown>): StaffMember {
+    const fields: Record<string, string> = {}
+    const username = typeof b.username === 'string' ? b.username.trim().toLowerCase() : ''
+    const name = typeof b.name === 'string' ? b.name.trim() : ''
+    const password = typeof b.password === 'string' ? b.password : ''
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) fields.username = '3-40 letters, digits, dots, dashes or underscores'
+    if (!name) fields.name = 'must not be blank'
+    else if (name.length > 100) fields.name = 'size must be between 0 and 100'
+    if (b.role !== 'ADVISOR' && b.role !== 'TECHNICIAN') fields.role = 'must not be null'
+    if (Object.keys(fields).length) throw new Problem(400, 'Some fields need fixing.', fields)
+    checkPassword('password', password)
+    if (this.state.staff.some((s) => s.username === username)) throw new Problem(409, 'Some fields need fixing.', { username: 'this username is taken' })
+    const s: DemoStaff = { id: this.state.staff.reduce((max, x) => Math.max(max, x.id), 0) + 1, username, name, role: b.role as Role, active: true, password }
+    this.state.staff.push(s)
+    return asStaffMember(s)
+  }
+
+  /** Deactivate, reactivate or set a password, with the server's rules. */
+  private staffAction(me: Me, id: number, action: string, b: Record<string, unknown>): StaffMember {
+    const s = this.state.staff.find((x) => x.id === id)
+    if (!s) throw new Problem(404, `There is no staff member ${id}.`)
+    if (action === 'deactivate') {
+      if (s.id === me.id) throw new Problem(409, 'You cannot deactivate your own account.')
+      if (s.active) {
+        if (s.role === 'ADVISOR' && this.state.staff.filter((x) => x.active && x.role === 'ADVISOR').length <= 1) {
+          throw new Problem(409, 'Keep at least one active service advisor.')
+        }
+        s.active = false
+        // Their open jobs go back to nobody; finished ones keep the name.
+        for (const j of this.state.jobs) if (j.assignedTo === s.id && NEXT[j.status].length > 0) j.assignedTo = null
+      }
+    } else if (action === 'activate') {
+      s.active = true
+    } else {
+      if (s.id === me.id) throw new Problem(409, 'Use "Change my password" for your own account.')
+      const password = typeof b.password === 'string' ? b.password : ''
+      checkPassword('password', password)
+      s.password = password
+    }
+    return asStaffMember(s)
+  }
+
+  private changeOwnPassword(me: Me, b: Record<string, unknown>) {
+    const s = this.state.staff.find((x) => x.id === me.id)!
+    const next = typeof b.newPassword === 'string' ? b.newPassword : ''
+    if (b.currentPassword !== s.password) throw new Problem(400, 'Some fields need fixing.', { currentPassword: 'this is not your current password' })
+    checkPassword('newPassword', next)
+    if (next === s.password) throw new Problem(400, 'Some fields need fixing.', { newPassword: 'choose a password different from the current one' })
+    s.password = next
   }
 
   private assignee(id: number | null): Assignee | null {

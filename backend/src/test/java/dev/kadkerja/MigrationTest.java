@@ -28,10 +28,15 @@ class MigrationTest {
             + " values (1, null, 'RECEIVED', TIMESTAMP WITH TIME ZONE '2026-01-01 00:00:00+00', null),"
             + " (1, 'RECEIVED', 'QUOTED', TIMESTAMP WITH TIME ZONE '2026-01-01 01:00:00+00', 'old note')");
 
+    // An account made under V3 (before session epochs existed).
+    Flyway.configure().dataSource(ds).target("3").load().migrate();
+    jdbc.update(
+        "insert into staff_user (id, username, display_name, password_hash, role, active)"
+            + " values (1, 'old', 'Old Advisor', '{bcrypt}x', 'ADVISOR', true)");
+
     var result = Flyway.configure().dataSource(ds).load().migrate();
 
     assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(2);
-    assertThat(jdbc.queryForObject("select count(*) from staff_user", Integer.class)).isZero();
     assertThat(jdbc.queryForList("select actor from status_event order by id", String.class))
         .containsExactly("STAFF", "STAFF");
     assertThat(jdbc.queryForObject("select note from status_event where to_status = 'QUOTED'", String.class))
@@ -39,5 +44,8 @@ class MigrationTest {
     // V4: jobs from before assignment existed have nobody assigned.
     assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(4);
     assertThat(jdbc.queryForObject("select assigned_to from job_card where id = 1", Long.class)).isNull();
+    // V5: accounts from before keep working (session epoch 0, still active).
+    assertThat(jdbc.queryForObject("select session_epoch from staff_user where username = 'old'", Integer.class)).isZero();
+    assertThat(jdbc.queryForObject("select active from staff_user where username = 'old'", Boolean.class)).isTrue();
   }
 }

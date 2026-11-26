@@ -126,6 +126,13 @@ export interface StaffMember {
   active: boolean
 }
 
+export interface NewStaff {
+  username: string
+  name: string
+  role: Role
+  password: string
+}
+
 /** Fired when the server says the session is gone, so the app shows the sign-in form. */
 export const SIGNED_OUT_EVENT = 'kadkerja:signed-out'
 
@@ -186,6 +193,12 @@ export const api = {
   jobs: () => call<JobSummary[]>('/api/jobs'),
   myJobs: () => call<JobSummary[]>('/api/jobs?mine=true'),
   staff: () => call<StaffMember[]>('/api/staff'),
+  addStaff: (body: NewStaff) => post<StaffMember>('/api/staff', body),
+  deactivateStaff: (id: number) => post<StaffMember>(`/api/staff/${id}/deactivate`, {}),
+  activateStaff: (id: number) => post<StaffMember>(`/api/staff/${id}/activate`, {}),
+  setStaffPassword: (id: number, password: string) => post<StaffMember>(`/api/staff/${id}/password`, { password }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    post<void>('/api/auth/password', { currentPassword, newPassword }),
   assign: (id: number, staffId: number | null) =>
     call<JobCard>(`/api/jobs/${id}/assignee`, { method: 'PUT', body: JSON.stringify({ staffId }) }),
   job: (id: number) => call<JobCard>(`/api/jobs/${id}`),

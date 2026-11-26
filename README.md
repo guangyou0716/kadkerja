@@ -6,8 +6,8 @@
 the front desk writes down the complaint, the mechanic finds the problem, someone phones the customer with a
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
-Status: **work in progress** (increments 1-3 of 6 and most of 4: the API, the staff web app, the
-customer's progress link, staff sign-in with roles, technician assignment and "My jobs"). Plan in [Roadmap](#roadmap).
+Status: **work in progress** (increments 1-4 of 6: the API, the staff web app, the customer's progress link,
+staff sign-in with roles, technician assignment, "My jobs" and staff management). Plan in [Roadmap](#roadmap).
 
 **Try it: [kadkerja-demo.guangyou.workers.dev](https://kadkerja-demo.guangyou.workers.dev)** (browser-only demo).
 Sign in as `advisor` (service advisor) or `tech` (technician), password `demo-kadkerja`. Open the quoted job
@@ -17,7 +17,9 @@ PKR 1234, use *Copy link*, and open the link to approve or decline as the custom
 > (`frontend/src/demo`) that follows the same workshop rules. There is no server and no database: data stays in
 > your browser (localStorage) on that device, and **Reset demo** in the yellow bar brings back the sample cars.
 > Server-side protections (sessions, CSRF, password hashing, guessing limit, rate limits, link expiry) are not
-> part of the demo; they are in the backend and its tests. Only the separate demo build contains this code.
+> part of the demo; they are in the backend and its tests. Staff you add in the demo keep their password as typed,
+> in your own browser only (the server stores bcrypt hashes). Only the separate demo build contains this code.
+> The online demo is deployed by hand and can lag behind `main`.
 
 <p>
   <img src="docs/board.png" alt="Job board: open job cards in four columns (Checked in, Waiting for customer, In the workshop, Ready to collect), each card with plate, car, customer, complaint and a status badge" width="860">
@@ -42,6 +44,8 @@ only). Two roles:
 | Add or remove quote lines (while inspecting) | yes | on their own or unassigned cars |
 | Moves | all | start inspection, start the approved repair, mark it ready (own or unassigned cars) |
 | *My jobs*: own cars, to work on / waiting | - | yes |
+| *Staff*: add people, deactivate / reactivate, set a new password | yes | no |
+| *My password*: change own password | yes | yes |
 
 A technician can open any job card but changes only cars assigned to them or to nobody; starting work on an
 unassigned car makes it theirs. Only an active technician can be given a car, and a collected or cancelled job
@@ -64,6 +68,20 @@ hides what the person cannot use.
   sign-in from there for 15 minutes, even with the right password. Unknown user, wrong password and a disabled
   account all get the same answer, and an unknown user still costs a password hash, so timing does not tell
   which usernames exist. Passwords are stored as bcrypt hashes only.
+- **Staff management**: the advisor adds people (username, name, role, a first password of 12+ characters and at most
+  72 bytes, since bcrypt ignores the rest), deactivates and reactivates them, and sets a new password when someone
+  forgets theirs. Nobody is deleted, so names stay on old jobs. Nobody can deactivate themselves, and the last
+  active advisor cannot be deactivated (the active advisors are row-locked while checking, so two advisors cannot
+  deactivate each other at the same moment). A deactivated technician's open jobs go back to *nobody*.
+- **Sessions end when the account changes**: each account has a session counter that goes up when it is
+  deactivated or gets a new password; a session signed in before that is dropped at its next request (`401`, the
+  app shows sign-in). Changing your own password (current password required, wrong guesses count towards the
+  sign-in limit) keeps that session and ends the others.
+
+<p>
+  <img src="docs/staff.png" alt="Staff page for the service advisor: a table of Aina Demo (technician, active), Farah Demo (you, advisor, active) and Hafiz Demo (technician, deactivated) with Set password and Deactivate/Reactivate buttons, and a form to add a member of staff" width="720">
+</p>
+
 - **No default password on a real install**: on an empty database, set `KADKERJA_ADMIN_PASSWORD` (12+ characters)
   once to create the advisor `admin`. Without it nobody can sign in. Over HTTPS also set
   `server.servlet.session.cookie.secure=true`.
@@ -159,6 +177,11 @@ Everything under `/api/jobs` needs a signed-in session (and the CSRF header for 
 | `POST` | `/api/jobs/{id}/link` | Make a new customer link (the old one stops working) |
 | `PUT` | `/api/jobs/{id}/assignee` | Advisor: give the job to a technician `{staffId}` (`null` = nobody) |
 | `GET` | `/api/staff` | Advisor: staff list (id, username, name, role, active; never password hashes) |
+| `POST` | `/api/staff` | Advisor: add someone `{username, name, role, password}` |
+| `POST` | `/api/staff/{id}/deactivate` | Advisor: stop them signing in, end their sessions, hand back their open jobs |
+| `POST` | `/api/staff/{id}/activate` | Advisor: let them sign in again |
+| `POST` | `/api/staff/{id}/password` | Advisor: set a new password for someone else `{password}` (ends their sessions) |
+| `POST` | `/api/auth/password` | Change my own password `{currentPassword, newPassword}` (`204`; other sessions end) |
 | `GET` | `/api/public/jobs/{token}` | Customer view: progress, sent quote, whether it can be answered |
 | `POST` | `/api/public/jobs/{token}/answer` | Customer answer `{decision: APPROVE/DECLINE, quoteVersion, note?}` |
 
@@ -207,7 +230,7 @@ the schema.
   live in one file (`frontend/src/status.ts`); the allowed moves always come from the server.
 - The rules live in the domain (`JobStatus`, `JobCard`): every change goes through methods that check them, so
   no caller can skip a step. Views are built inside the service transaction (`open-in-view` is off).
-- Backend tests (61): every one of the 81 status pairs is checked against an independent table, every status is
+- Backend tests (68): every one of the 81 status pairs is checked against an independent table, every status is
   reachable and none is a dead end; 2,000 random quotes add up exactly (lines, tax, total) and per-line tax is
   never more than half a sen off; the whole flow through the HTTP API with MockMvc; refused moves and edits
   change nothing; field-by-field validation; plate reuse, owner changes and the one-open-job rule; the token never leaks; demo
@@ -222,8 +245,13 @@ the schema.
   sign-in), sign-in itself needs the token, an overlong password is just wrong, the first-admin bootstrap, sign-out, and what a technician may and may not do (every
   status pair checked). Assignment with real sign-ins: only an active technician and only by the advisor, my jobs,
   taking a car back, a finished job keeps its technician, another technician's car is refused for moves and quote
-  lines, starting an unassigned car takes it (a refused move does not), and the staff list has no hashes.
-- Frontend tests (72, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+  lines, starting an unassigned car takes it (a refused move does not), and the staff list has no hashes. Staff
+  management: adding (lower-cased username, taken username, short and over-72-byte passwords, bad role, advisor
+  only), deactivating ends the person's live session and refuses sign-in while the customer link keeps working in
+  that browser, open jobs handed back and finished ones kept, reactivating, no self-deactivation, the last-advisor
+  rule, a new password from the advisor ends old sessions, changing your own keeps this session and ends the others,
+  and guessing the current password is limited. A V3-era account migrates with session counter 0.
+- Frontend tests (84, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
@@ -233,10 +261,12 @@ the schema.
   the CSRF header on sign-in and on changes, back to the form when the session ends, sign-out really shows the
   form again) and the technician's view (no check-in, no customer link, only workshop moves); assigning a technician (only active
   technicians offered, one who has left still shown, unassign), another technician's car is read-only, *My jobs*
-  order and empty state, who has each car on the board. Price parsing round-trips every formatted amount.
+  order and empty state, who has each car on the board; the Staff page (own row without buttons, add with a taken
+  username shown on the field, deactivate only after confirming, set a password with the server's check on the
+  field, hidden from technicians) and *My password* (repeat checked before sending, wrong current password). Price parsing round-trips every formatted amount.
   Browser demo: the in-browser stand-in's sign-in, seed totals, the whole check-in -> quote -> customer approval
-  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, form checks, what the customer link hides,
-  new links; the whole app signing in and approving on it, *My jobs*; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
+  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, form checks, what the customer link hides,
+  new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
 
@@ -245,8 +275,8 @@ the schema.
 1. ✅ Backend: job cards, status flow, quotes with SST, REST API, validation, tests on H2 and PostgreSQL, CI.
 2. ✅ React + TypeScript staff web app: job board by status, check-in form, job card page with quote editor.
 3. ✅ Customer progress link (no login): timeline, quote, approve/decline with a stale-quote guard, WhatsApp text.
-4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs".
-   Next: staff management (the advisor adds and deactivates staff, resets passwords).
+4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs", staff
+   management (add, deactivate/reactivate, set and change passwords; sessions end when an account changes).
 5. Before/after photos, parts stock deducted on approval.
 6. Bahasa Melayu and 简体中文, accessibility pass, Docker Compose, Playwright end-to-end tests, demo GIF.
 

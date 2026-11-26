@@ -63,11 +63,12 @@ describe('browser demo (whole app on the in-browser backend)', () => {
 
   it('throws away a saved demo from an older version or a damaged save and starts again', async () => {
     const old = { version: 1, seq: 0, signedIn: 'advisor', customers: [], vehicles: [], jobs: [] }
-    for (const saved of [JSON.stringify(old), JSON.stringify({ ...old, version: 2 }), '{not json']) {
+    const v2 = { ...old, version: 2, staff: [{ id: 1, username: 'advisor', name: 'Farah Demo', role: 'ADVISOR', active: true }] }
+    for (const saved of [JSON.stringify(old), JSON.stringify(v2), JSON.stringify({ ...old, version: 3 }), '{not json']) {
       window.localStorage.setItem(STORAGE_KEY, saved)
       expect((await fetch('/api/auth/me')).status).toBe(401)
       const state = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)
-      expect(state.version).toBe(2)
+      expect(state.version).toBe(3)
       expect(state.jobs).toHaveLength(5)
       expect(state.staff.map((s: { username: string }) => s.username)).toEqual(['advisor', 'tech'])
     }
@@ -80,6 +81,20 @@ describe('browser demo (whole app on the in-browser backend)', () => {
     expect(within(todo).getByText('BKE 5021')).toBeInTheDocument()
     expect(within(todo).getByText('PNG 8810')).toBeInTheDocument()
     expect(screen.getByText('2 to work on · 0 waiting · 0 finished')).toBeInTheDocument()
+  })
+
+  it('the advisor adds a technician on the Staff page who can then sign in', async () => {
+    renderAt('/staff')
+    const user = await signIn('advisor')
+    await user.type(await screen.findByLabelText('Full name'), 'Aina Demo')
+    await user.type(screen.getByLabelText('Username'), 'aina')
+    await user.type(screen.getByLabelText('First password'), 'aina first password')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Aina Demo can now sign in as aina.')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Deactivate Aina Demo' })).toBeInTheDocument()
+    await fetch('/api/auth/logout', { method: 'POST' })
+    const res = await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: 'aina', password: 'aina first password' }) })
+    expect(await res.json()).toMatchObject({ name: 'Aina Demo', role: 'TECHNICIAN' })
   })
 
   it('reset throws the changes away and brings back the sample cars', async () => {

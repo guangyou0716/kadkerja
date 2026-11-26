@@ -172,6 +172,15 @@ public class JobCardService {
     return view(jobs.saveAndFlush(job));
   }
 
+  /** Someone has left: their open jobs go back to nobody (finished jobs keep their name). */
+  public void unassignOpenJobs(long staffId) {
+    for (JobCard job : jobs.findByAssignedToIdOrderByIdDesc(staffId)) {
+      if (!job.getStatus().finished()) {
+        job.assign(null);
+      }
+    }
+  }
+
   /** A technician may change only a job that is theirs or that nobody has yet. */
   private static void requireMayWorkOn(JobCard job, Who who) {
     StaffUser assignee = job.getAssignedTo();
