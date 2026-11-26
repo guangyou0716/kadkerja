@@ -4,6 +4,7 @@ import dev.kadkerja.job.JobCardService;
 import dev.kadkerja.job.JobCardSummary;
 import dev.kadkerja.job.JobCardView;
 import dev.kadkerja.job.JobStatus;
+import dev.kadkerja.staff.Role;
 import dev.kadkerja.web.Requests.CheckInRequest;
 import dev.kadkerja.web.Requests.LineRequest;
 import dev.kadkerja.web.Requests.MoveRequest;
@@ -11,6 +12,7 @@ import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -67,8 +69,16 @@ public class JobCardController {
   }
 
   @PostMapping("/{id}/moves")
-  public JobCardView move(@PathVariable long id, @Valid @RequestBody MoveRequest r) {
-    return service.move(id, r.to(), r.note());
+  public JobCardView move(
+      @PathVariable long id, @Valid @RequestBody MoveRequest r, Authentication who) {
+    return service.move(id, r.to(), r.note(), roleOf(who));
+  }
+
+  static Role roleOf(Authentication who) {
+    return who.getAuthorities().stream()
+            .anyMatch(a -> ("ROLE_" + Role.ADVISOR.name()).equals(a.getAuthority()))
+        ? Role.ADVISOR
+        : Role.TECHNICIAN;
   }
 
   /** A new customer link; the old one stops working. */

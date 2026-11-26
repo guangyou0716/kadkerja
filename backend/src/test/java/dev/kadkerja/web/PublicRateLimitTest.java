@@ -1,6 +1,7 @@
 package dev.kadkerja.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -14,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -58,6 +60,7 @@ class PublicRateLimitTest {
   @SpringBootTest(
       properties = {"kadkerja.public.reads-per-minute=3", "kadkerja.public.answers-per-minute=2"})
   @AutoConfigureMockMvc
+  @WithMockUser(roles = "ADVISOR")
   @org.junit.jupiter.api.Nested
   class OverHttp {
     @Autowired MockMvc mvc;

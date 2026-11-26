@@ -6,8 +6,8 @@
 the front desk writes down the complaint, the mechanic finds the problem, someone phones the customer with a
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
-Status: **work in progress** (increments 1-3 of 6: the API, the staff web app and the customer's progress link).
-No staff login yet (increment 4), so do not put it on the internet yet. Plan in [Roadmap](#roadmap).
+Status: **work in progress** (increments 1-3 of 6 and the first half of 4: the API, the staff web app, the
+customer's progress link, staff sign-in with roles). Not deployed anywhere; try it locally with the demo profile. Plan in [Roadmap](#roadmap).
 
 <p>
   <img src="docs/board.png" alt="Job board: open job cards in four columns (Checked in, Waiting for customer, In the workshop, Ready to collect), each card with plate, car, customer, complaint and a status badge" width="860">
@@ -18,6 +18,36 @@ No staff login yet (increment 4), so do not put it on the internet yet. Plan in 
 </p>
 
 ## What it does (so far)
+
+### Staff sign-in and roles
+
+Staff sign in with a username and password (demo: `advisor` or `tech`, password `demo-kadkerja`; demo profile
+only). Two roles:
+
+| | Service advisor | Technician |
+| --- | --- | --- |
+| See the board and job cards | yes | yes |
+| Check in a car, make a new customer link | yes | no |
+| Add or remove quote lines (while inspecting) | yes | yes |
+| Moves | all | start inspection, start the approved repair, mark it ready |
+
+The server enforces this (`403` with the reason); the web app only hides what the role cannot use.
+
+<p>
+  <img src="docs/sign-in.png" alt="Staff sign-in form after a wrong password: 'Wrong username or password.'" width="420">
+  <img src="docs/job-technician.png" alt="A job card signed in as the technician: no customer link panel, and 'The next step is for the service advisor.' once the car is ready" width="420">
+</p>
+
+- **Session cookie** (HttpOnly, SameSite=Lax, 12 h), a new session id at sign-in, sign-out ends it.
+- **CSRF**: every change sends the `XSRF-TOKEN` cookie back as the `X-XSRF-TOKEN` header; the token is replaced at
+  sign-in. The customer link has no session and needs none.
+- **Password guessing**: 5 failed sign-ins for one username from one address (or 20 from one address) block
+  sign-in from there for 15 minutes, even with the right password. Unknown user, wrong password and a disabled
+  account all get the same answer, and an unknown user still costs a password hash, so timing does not tell
+  which usernames exist. Passwords are stored as bcrypt hashes only.
+- **No default password on a real install**: on an empty database, set `KADKERJA_ADMIN_PASSWORD` (12+ characters)
+  once to create the advisor `admin`. Without it nobody can sign in. Over HTTPS also set
+  `server.servlet.session.cookie.secure=true`.
 
 ### Customer progress link (no login)
 
@@ -92,8 +122,14 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
 
 ## API
 
+Everything under `/api/jobs` needs a signed-in session (and the CSRF header for changes); `/api/public/...` does not.
+
 | Method | Path | What |
 | --- | --- | --- |
+| `GET` | `/api/auth/csrf` | CSRF token (also set as the `XSRF-TOKEN` cookie) |
+| `POST` | `/api/auth/login` | Sign in `{username, password}` -> who and which role |
+| `GET` | `/api/auth/me` | Who is signed in (`401` if nobody) |
+| `POST` | `/api/auth/logout` | Sign out (`204`) |
 | `GET` | `/api/jobs?status=QUOTED` | Job board rows, newest first (optional status filter) |
 | `POST` | `/api/jobs` | Check in a car (creates the job card) |
 | `GET` | `/api/jobs/{id}` | Job card with vehicle, customer, quote lines, totals, timeline, next moves |
@@ -105,7 +141,7 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
 | `POST` | `/api/public/jobs/{token}/answer` | Customer answer `{decision: APPROVE/DECLINE, quoteVersion, note?}` |
 
 ```bash
-curl -s localhost:8080/api/jobs/1
+curl -s -b cookies localhost:8080/api/jobs/1   # after signing in with that cookie jar
 # {"id":1,"number":"KK-2026-0001","status":"QUOTED","next":["INSPECTING","APPROVED","DECLINED","CANCELLED"],
 #  "vehicle":{"plate":"PKR 1234","make":"Perodua","model":"Myvi",...},"subtotalSen":30300,"taxSen":2424,
 #  "totalSen":32724,"sstRatePercent":8,"events":[...]}
@@ -118,7 +154,8 @@ default.
 
 ```bash
 cd backend
-./mvnw spring-boot:run -Dspring-boot.run.profiles=demo   # API on :8080 with made-up demo jobs
+./mvnw spring-boot:run -Dspring-boot.run.profiles=demo   # API on :8080 with made-up demo jobs and staff
+                                                          # (advisor / tech, password demo-kadkerja)
                                                           # (logs a customer link for the quoted demo job)
 ./mvnw verify                                             # backend tests
 
@@ -134,13 +171,13 @@ the schema.
 
 ## How it is built
 
-- Java 21, Spring Boot 4.2 (Spring MVC, Data JPA, Bean Validation, Flyway), PostgreSQL 17 / H2.
+- Java 21, Spring Boot 4.2 (Spring MVC, Spring Security, Data JPA, Bean Validation, Flyway), PostgreSQL 17 / H2.
 - React 19 + TypeScript + Vite, React Router, TanStack Query (every change returns the whole job card, which
   replaces the cached one; the board is refreshed), Tailwind CSS. Status labels, button texts and board columns
   live in one file (`frontend/src/status.ts`); the allowed moves always come from the server.
 - The rules live in the domain (`JobStatus`, `JobCard`): every change goes through methods that check them, so
   no caller can skip a step. Views are built inside the service transaction (`open-in-view` is off).
-- Backend tests (40): every one of the 81 status pairs is checked against an independent table, every status is
+- Backend tests (56): every one of the 81 status pairs is checked against an independent table, every status is
   reachable and none is a dead end; 2,000 random quotes add up exactly (lines, tax, total) and per-line tax is
   never more than half a sen off; the whole flow through the HTTP API with MockMvc; refused moves and edits
   change nothing; field-by-field validation; plate reuse, owner changes and the one-open-job rule; the token never leaks; demo
@@ -148,14 +185,21 @@ the schema.
   stale-quote and double-answer refusals; one job's token cannot read or answer another job; draft quotes,
   names, phones and staff notes never reach the public view; malformed, unknown, reset and expired links; the
   rate limit per client and per kind, with the staff API unaffected; and a database written by the previous
-  schema version migrates with its old timeline intact.
-- Frontend tests (33, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+  schema version migrates with its old timeline intact. Sign-in through the real HTTP API with no mock users:
+  `401` without a session while the customer link stays open, a new session id at sign-in, the same answer for
+  wrong password / unknown user / disabled account, the guessing limit (also unit-tested with a clock), CSRF
+  refused when missing or mismatched and accepted the browser's way (cookie -> header, new token after
+  sign-in), sign-in itself needs the token, an overlong password is just wrong, the first-admin bootstrap, sign-out, and what a technician may and may not do (every
+  status pair checked).
+- Frontend tests (40, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
   keeps the card as it was, finished and unknown jobs; the customer page (no staff navigation, approve/decline only after confirming and
   with the version shown, a changed quote is explained and reloaded, hidden draft quote, expired link, a confirmation closes if a newer quote arrives), the
-  WhatsApp message and number format, and *New link* only after confirming. Price parsing round-trips every formatted amount.
+  WhatsApp message and number format, and *New link* only after confirming; sign-in (wrong then right password,
+  the CSRF header on sign-in and on changes, back to the form when the session ends, sign-out really shows the
+  form again) and the technician's view (no check-in, no customer link, only workshop moves). Price parsing round-trips every formatted amount.
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
 
@@ -164,7 +208,7 @@ the schema.
 1. ✅ Backend: job cards, status flow, quotes with SST, REST API, validation, tests on H2 and PostgreSQL, CI.
 2. ✅ React + TypeScript staff web app: job board by status, check-in form, job card page with quote editor.
 3. ✅ Customer progress link (no login): timeline, quote, approve/decline with a stale-quote guard, WhatsApp text.
-4. Staff login (Spring Security; advisor and technician roles), technician assignment, "my jobs".
+4. ✅ Staff sign-in (Spring Security; advisor and technician roles). Next: technician assignment, "my jobs".
 5. Before/after photos, parts stock deducted on approval.
 6. Bahasa Melayu and 简体中文, accessibility pass, Docker Compose, Playwright end-to-end tests, demo GIF.
 

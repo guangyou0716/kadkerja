@@ -30,7 +30,8 @@ class MigrationTest {
 
     var result = Flyway.configure().dataSource(ds).load().migrate();
 
-    assertThat(result.targetSchemaVersion).isEqualTo("2");
+    assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(2);
+    assertThat(jdbc.queryForObject("select count(*) from staff_user", Integer.class)).isZero();
     assertThat(jdbc.queryForList("select actor from status_event order by id", String.class))
         .containsExactly("STAFF", "STAFF");
     assertThat(jdbc.queryForObject("select note from status_event where to_status = 'QUOTED'", String.class))

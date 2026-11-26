@@ -25,6 +25,12 @@ public class ErrorHandler extends ResponseEntityExceptionHandler {
     return problem(HttpStatus.CONFLICT, "Not allowed", e.getMessage());
   }
 
+  /** A role check in a controller (the URL rules in SecurityConfig answer 403 themselves). */
+  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+  ProblemDetail denied(org.springframework.security.access.AccessDeniedException e) {
+    return problem(HttpStatus.FORBIDDEN, "Not allowed", e.getMessage());
+  }
+
   @ExceptionHandler(NotFoundException.class)
   ProblemDetail notFound(NotFoundException e) {
     return problem(HttpStatus.NOT_FOUND, "Not found", e.getMessage());
