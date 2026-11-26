@@ -1,0 +1,55 @@
+# kadkerja on one machine: PostgreSQL + the Spring Boot API + the web app behind nginx.
+#
+#   docker compose up --build                                   # empty workshop; see README for the first advisor
+#   KADKERJA_PROFILES=postgres,demo docker compose up --build   # with the made-up demo cars and staff
+#
+# Then open http://localhost:8081. Only the web container is published, and only on this machine
+# (127.0.0.1); the API and the database are reachable from the web container alone.
+name: kadkerja
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kadkerja
+      POSTGRES_USER: kadkerja
+      # Local use only. Set your own for anything that is not your laptop.
+      POSTGRES_PASSWORD: ${KADKERJA_DB_PASSWORD:-kadkerja}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kadkerja -d kadkerja"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      SPRING_PROFILES_ACTIVE: ${KADKERJA_PROFILES:-postgres}
+      DB_URL: jdbc:postgresql://db:5432/kadkerja
+      DB_USER: kadkerja
+      DB_PASSWORD: ${KADKERJA_DB_PASSWORD:-kadkerja}
+      # Creates the advisor "admin" on an empty database (12+ characters). Unset = nobody can sign in
+      # (unless the demo profile is on).
+      KADKERJA_ADMIN_PASSWORD: ${KADKERJA_ADMIN_PASSWORD:-}
+      # Behind nginx: take the client address from X-Forwarded-For (nginx overwrites it), so the
+      # sign-in and customer-link limits count real clients and not the proxy.
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:${KADKERJA_PORT:-8081}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:

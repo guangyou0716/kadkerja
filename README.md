@@ -109,7 +109,7 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
   make a **new link** at any time (the old one stops working at once); responses are `Cache-Control: no-store`,
   `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`; and each client gets 60 reads and 10 answers per
   minute (`429` with `Retry-After` after that). The limit is in memory per server, keyed on the connection's
-  address: behind a reverse proxy, turn on Spring's forwarded-header support first.
+  address: behind a reverse proxy, turn on Spring's forwarded-header support first (the Docker Compose setup does).
 - **Staff side**: the job card shows the link with *Send on WhatsApp* (a `wa.me` link with a message that fits
   the status, e.g. the total for a quote), *Copy link* and *New link*. Moves the customer made are marked
   "by customer (link)" in the timeline.
@@ -282,6 +282,37 @@ With PostgreSQL: create a database and run with the `postgres` profile (`DB_URL`
 defaults `jdbc:postgresql://localhost:5432/kadkerja`, `kadkerja`/`kadkerja` for local use only). Flyway creates
 the schema.
 
+### With Docker Compose (PostgreSQL + API + web app)
+
+Needs only Docker. One command builds and starts PostgreSQL 17, the Spring Boot API and the web app (served by
+nginx, which also passes `/api` to the API):
+
+```bash
+KADKERJA_PROFILES=postgres,demo docker compose up --build   # with the made-up demo cars and staff
+                                                           # (advisor / tech, password demo-kadkerja)
+# open http://localhost:8081
+
+KADKERJA_ADMIN_PASSWORD='choose-12-or-more' docker compose up --build   # an empty workshop; sign in as admin
+docker compose down        # stop (data stays in the db-data volume)
+docker compose down -v     # stop and delete the data
+```
+
+- Only the web container is published, and only on this machine (`127.0.0.1:8081`; change the port with
+  `KADKERJA_PORT`). The API and the database are reachable from inside the Compose network only. To open the
+  customer link on a phone on the same Wi-Fi, publish the port on your LAN address instead - and then set your own
+  `KADKERJA_DB_PASSWORD` and admin password, and never use the demo profile.
+- nginx **overwrites** `X-Forwarded-For` with the real client address and the API reads it
+  (`SERVER_FORWARD_HEADERS_STRATEGY=native`), so the sign-in limit and the customer-link rate limit count each
+  client, not the proxy, and a made-up header cannot get around them.
+- nginx adds `X-Content-Type-Options`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer` (the customer
+  link has its key in the URL), caches the hashed files under `/assets` for a year and allows 6 MB request bodies
+  (the API itself limits photos to 4 MB).
+- No HTTPS here: for a real server put it behind a TLS proxy, set `SERVER_SERVLET_SESSION_COOKIE_SECURE=true` on
+  the API, and let nginx pass on that proxy's `X-Forwarded-For` (otherwise every client looks like the TLS proxy).
+- CI builds and starts this stack on every push and runs [`scripts/compose-smoke.sh`](scripts/compose-smoke.sh)
+  against it: the app and its routes, sign-in with the CSRF cookie, demo data read from PostgreSQL, a fake
+  `X-Forwarded-For` that must not get around the sign-in limit, and a restart that keeps the data.
+
 ## How it is built
 
 - Java 21, Spring Boot 4.2 (Spring MVC, Spring Security, Data JPA, Bean Validation, Flyway), PostgreSQL 17 / H2.
@@ -346,7 +377,8 @@ the schema.
   full browser storage refused with nothing changed), form checks, what the customer link hides,
   new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
-  (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
+  (Flyway migration + API tests), the frontend's lint (oxlint), typecheck, tests and build, and the Docker Compose
+  stack built, started and smoke-tested through nginx.
 
 ## Roadmap
 
@@ -356,7 +388,8 @@ the schema.
 4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs", staff
    management (add, deactivate/reactivate, set and change passwords; sessions end when an account changes).
 5. ✅ Parts stock deducted on approval, before/after photos per job card.
-6. Bahasa Melayu and 简体中文, accessibility pass, Docker Compose, Playwright end-to-end tests, demo GIF.
+6. Docker Compose ✅ (PostgreSQL + API + nginx, started and smoke-tested in CI); next: Bahasa Melayu and 简体中文,
+   accessibility pass, Playwright end-to-end tests, demo GIF.
 
 ## Privacy
 
