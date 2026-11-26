@@ -1,0 +1,10 @@
+// Browser-only demo (no backend): static files from `npm run build:demo`, served by Cloudflare.
+// Deploy: npm run deploy:demo (needs Cloudflare credentials in the environment).
+{
+  "name": "kadkerja-demo",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist-demo",
+    "not_found_handling": "single-page-application"
+  }
+}

@@ -7,7 +7,17 @@ the front desk writes down the complaint, the mechanic finds the problem, someon
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
 Status: **work in progress** (increments 1-3 of 6 and the first half of 4: the API, the staff web app, the
-customer's progress link, staff sign-in with roles). Not deployed anywhere; try it locally with the demo profile. Plan in [Roadmap](#roadmap).
+customer's progress link, staff sign-in with roles). Plan in [Roadmap](#roadmap).
+
+**Try it: [kadkerja-demo.guangyou.workers.dev](https://kadkerja-demo.guangyou.workers.dev)** (browser-only demo).
+Sign in as `advisor` (service advisor) or `tech` (technician), password `demo-kadkerja`. Open the quoted job
+PKR 1234, use *Copy link*, and open the link to approve or decline as the customer.
+
+> The online demo is the real React app with the Spring Boot API replaced by a small **in-browser stand-in**
+> (`frontend/src/demo`) that follows the same workshop rules. There is no server and no database: data stays in
+> your browser (localStorage) on that device, and **Reset demo** in the yellow bar brings back the sample cars.
+> Server-side protections (sessions, CSRF, password hashing, guessing limit, rate limits, link expiry) are not
+> part of the demo; they are in the backend and its tests. Only the separate demo build contains this code.
 
 <p>
   <img src="docs/board.png" alt="Job board: open job cards in four columns (Checked in, Waiting for customer, In the workshop, Ready to collect), each card with plate, car, customer, complaint and a status badge" width="860">
@@ -163,7 +173,15 @@ cd frontend
 npm install
 npm run dev                                               # http://localhost:5173 (proxies /api to :8080)
 npm test                                                  # frontend tests
+
+npm run dev:demo                                          # the browser-only demo (no backend needed)
+npm run build:demo                                        # -> frontend/dist-demo (static files)
+npm run deploy:demo                                       # Cloudflare Worker with static assets
+                                                          # (wrangler.demo.jsonc; needs Cloudflare credentials)
 ```
+
+The demo build is a separate Vite mode (`--mode demo`). In the normal build the demo branch in `main.tsx` is
+dead code and is dropped; a test builds both and checks that the normal build has no demo code or demo password.
 
 With PostgreSQL: create a database and run with the `postgres` profile (`DB_URL`, `DB_USER`, `DB_PASSWORD`;
 defaults `jdbc:postgresql://localhost:5432/kadkerja`, `kadkerja`/`kadkerja` for local use only). Flyway creates
@@ -191,7 +209,7 @@ the schema.
   refused when missing or mismatched and accepted the browser's way (cookie -> header, new token after
   sign-in), sign-in itself needs the token, an overlong password is just wrong, the first-admin bootstrap, sign-out, and what a technician may and may not do (every
   status pair checked).
-- Frontend tests (40, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+- Frontend tests (56, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
@@ -200,6 +218,9 @@ the schema.
   WhatsApp message and number format, and *New link* only after confirming; sign-in (wrong then right password,
   the CSRF header on sign-in and on changes, back to the form when the session ends, sign-out really shows the
   form again) and the technician's view (no check-in, no customer link, only workshop moves). Price parsing round-trips every formatted amount.
+  Browser demo: the in-browser stand-in's sign-in, seed totals, the whole check-in -> quote -> customer approval
+  flow, the stale-quote and double-answer refusals, technician limits, form checks, what the customer link hides,
+  new links; the whole app signing in and approving on it; reset; and both builds (the real one without demo code).
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
 
