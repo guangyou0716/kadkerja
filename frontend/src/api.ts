@@ -2,6 +2,12 @@ import type { JobStatus } from './status'
 
 export type LineKind = 'LABOUR' | 'PART'
 
+/** The technician a job is assigned to (null = nobody yet). */
+export interface Assignee {
+  id: number
+  name: string
+}
+
 export interface JobSummary {
   id: number
   number: string
@@ -11,6 +17,7 @@ export interface JobSummary {
   customer: string
   complaint: string
   createdAt: string
+  assignedTo: Assignee | null
 }
 
 export interface QuoteLine {
@@ -43,6 +50,7 @@ export interface JobCard {
   /** Key of the customer's progress link (/t/<token>). */
   publicToken: string
   events: { from: JobStatus | null; to: JobStatus; at: string; note: string | null; by: Actor }[]
+  assignedTo: Assignee | null
 }
 
 export type Actor = 'STAFF' | 'CUSTOMER'
@@ -103,9 +111,19 @@ export type Role = 'ADVISOR' | 'TECHNICIAN'
 
 /** The signed-in staff member. */
 export interface Me {
+  id: number
   username: string
   name: string
   role: Role
+}
+
+/** A member of staff as the advisor sees them (no password, ever). */
+export interface StaffMember {
+  id: number
+  username: string
+  name: string
+  role: Role
+  active: boolean
 }
 
 /** Fired when the server says the session is gone, so the app shows the sign-in form. */
@@ -166,6 +184,10 @@ export const api = {
   login: (username: string, password: string) => freshSession(post<Me>('/api/auth/login', { username, password })),
   logout: () => freshSession(post<void>('/api/auth/logout', {})),
   jobs: () => call<JobSummary[]>('/api/jobs'),
+  myJobs: () => call<JobSummary[]>('/api/jobs?mine=true'),
+  staff: () => call<StaffMember[]>('/api/staff'),
+  assign: (id: number, staffId: number | null) =>
+    call<JobCard>(`/api/jobs/${id}/assignee`, { method: 'PUT', body: JSON.stringify({ staffId }) }),
   job: (id: number) => call<JobCard>(`/api/jobs/${id}`),
   checkIn: (body: CheckIn) => post<JobCard>('/api/jobs', body),
   addLine: (id: number, line: NewLine) => post<JobCard>(`/api/jobs/${id}/lines`, line),

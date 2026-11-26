@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { fakeApi, job, renderAt } from '../test/render'
+import { fakeApi, job, renderAt, TECH } from '../test/render'
 
 const bodyOf = (init: RequestInit | undefined) => JSON.parse(String(init?.body))
 
@@ -168,5 +168,68 @@ describe('JobPage customer link', () => {
     )
     renderAt('/jobs/7')
     expect(await screen.findByText('by customer (link)')).toBeInTheDocument()
+  })
+})
+
+describe('JobPage technician', () => {
+  it('the advisor gives the car to an active technician', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi((_, init) =>
+      init?.method === 'PUT' ? { body: job({ assignedTo: { id: 3, name: 'Other Tech' } }) } : { body: job() },
+    )
+    renderAt('/jobs/7')
+    const select = await screen.findByRole('combobox', { name: 'Assigned to' })
+    await waitFor(() => expect(select).toBeEnabled())
+    const options = Array.from((select as HTMLSelectElement).options).map((o) => o.textContent)
+    // Only active technicians (no advisors, nobody who has left).
+    expect(options).toEqual(['Nobody yet', 'Test Tech', 'Other Tech'])
+    expect(screen.getByRole('button', { name: 'Assign' })).toBeDisabled()
+    await user.selectOptions(select, 'Other Tech')
+    await user.click(screen.getByRole('button', { name: 'Assign' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Assign' })).toBeDisabled())
+    const [, init] = api.mock.calls.find(([u, i]) => u === '/api/jobs/7/assignee' && i?.method === 'PUT')!
+    expect(bodyOf(init)).toEqual({ staffId: 3 })
+    expect(screen.getByRole('region', { name: 'Car and customer' })).toHaveTextContent('TechnicianOther Tech')
+    expect(select).toHaveValue('3')
+  })
+
+  it('keeps showing a technician who has since left, and can take the car back', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi((_, init) =>
+      init?.method === 'PUT' ? { body: job() } : { body: job({ assignedTo: { id: 4, name: 'Left Tech' } }) },
+    )
+    renderAt('/jobs/7')
+    const select = await screen.findByRole('combobox', { name: 'Assigned to' })
+    await waitFor(() => expect(select).toHaveValue('4'))
+    expect(screen.getByRole('option', { name: 'Left Tech (no longer active)' })).toBeInTheDocument()
+    await user.selectOptions(select, 'Nobody yet')
+    await user.click(screen.getByRole('button', { name: 'Unassign' }))
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Car and customer' })).toHaveTextContent('TechnicianNot assigned'))
+    const [, init] = api.mock.calls.find(([u, i]) => u === '/api/jobs/7/assignee' && i?.method === 'PUT')!
+    expect(bodyOf(init)).toEqual({ staffId: null })
+  })
+
+  it("a technician can look at another technician's car but not change it", async () => {
+    const api = fakeApi(() => ({ body: job({ status: 'RECEIVED', next: ['INSPECTING', 'CANCELLED'], assignedTo: { id: 3, name: 'Other Tech' } }) }), { me: TECH })
+    renderAt('/jobs/7')
+    expect(await screen.findByText(/This job is assigned to Other Tech/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start inspection' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Add a quote line' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Assigned to' })).not.toBeInTheDocument()
+    // A technician never asks for the staff list (the server would refuse it).
+    expect(api.mock.calls.some(([u]) => u === '/api/staff')).toBe(false)
+  })
+
+  it('a technician works on their own car and on an unassigned one', async () => {
+    fakeApi(() => ({ body: job({ status: 'RECEIVED', next: ['INSPECTING', 'CANCELLED'], assignedTo: { id: 2, name: 'Test Tech' } }) }), { me: TECH })
+    const { unmount } = renderAt('/jobs/7')
+    expect(await screen.findByRole('button', { name: 'Start inspection' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Car and customer' })).toHaveTextContent('Test Tech (you)')
+    expect(screen.getByRole('form', { name: 'Add a quote line' })).toBeInTheDocument()
+    unmount()
+    fakeApi(() => ({ body: job({ status: 'RECEIVED', next: ['INSPECTING', 'CANCELLED'] }) }), { me: TECH })
+    renderAt('/jobs/7')
+    expect(await screen.findByRole('button', { name: 'Start inspection' })).toBeInTheDocument()
   })
 })

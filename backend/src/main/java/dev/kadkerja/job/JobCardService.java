@@ -1,6 +1,9 @@
 package dev.kadkerja.job;
 
 import dev.kadkerja.staff.Role;
+import dev.kadkerja.staff.StaffUser;
+import dev.kadkerja.staff.StaffUserRepository;
+import dev.kadkerja.staff.Who;
 import java.time.Clock;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +17,7 @@ public class JobCardService {
   private final CustomerRepository customers;
   private final VehicleRepository vehicles;
   private final JobCardRepository jobs;
+  private final StaffUserRepository staff;
   private final Clock clock;
   private final int sstRatePercent;
   private final String workshopName;
@@ -22,12 +26,14 @@ public class JobCardService {
       CustomerRepository customers,
       VehicleRepository vehicles,
       JobCardRepository jobs,
+      StaffUserRepository staff,
       Clock clock,
       @Value("${kadkerja.sst-rate-percent:8}") int sstRatePercent,
       @Value("${kadkerja.workshop-name:Demo Auto Workshop}") String workshopName) {
     this.customers = customers;
     this.vehicles = vehicles;
     this.jobs = jobs;
+    this.staff = staff;
     this.clock = clock;
     this.sstRatePercent = sstRatePercent;
     this.workshopName = workshopName;
@@ -99,6 +105,12 @@ public class JobCardService {
     return found.stream().map(JobCardSummary::of).toList();
   }
 
+  /** Jobs assigned to one member of staff, newest first (finished ones included). */
+  @Transactional(readOnly = true)
+  public List<JobCardSummary> assignedTo(long staffId) {
+    return jobs.findByAssignedToIdOrderByIdDesc(staffId).stream().map(JobCardSummary::of).toList();
+  }
+
   private JobCard find(long id) {
     return jobs.findById(id)
         .orElseThrow(() -> new NotFoundException("There is no job card " + id + "."));
@@ -109,31 +121,83 @@ public class JobCardService {
     return view(find(id));
   }
 
+  /** A quote line added at the front desk (demo data, tests). */
   public JobCardView addLine(
       long id, LineKind kind, String description, int quantity, long unitPriceSen, boolean taxable) {
+    return addLine(id, kind, description, quantity, unitPriceSen, taxable, Who.FRONT_DESK);
+  }
+
+  public JobCardView addLine(
+      long id,
+      LineKind kind,
+      String description,
+      int quantity,
+      long unitPriceSen,
+      boolean taxable,
+      Who who) {
     JobCard job = find(id);
+    requireMayWorkOn(job, who);
     job.addLine(kind, description.trim(), quantity, unitPriceSen, taxable);
     return view(jobs.saveAndFlush(job));
   }
 
-  public JobCardView removeLine(long id, long lineId) {
+  public JobCardView removeLine(long id, long lineId, Who who) {
     JobCard job = find(id);
+    requireMayWorkOn(job, who);
     job.removeLine(lineId);
     return view(jobs.saveAndFlush(job));
   }
 
   /** A move by someone at the front desk (demo data, tests). */
   public JobCardView move(long id, JobStatus to, String note) {
-    return move(id, to, note, Role.ADVISOR);
+    return move(id, to, note, Who.FRONT_DESK);
   }
 
-  public JobCardView move(long id, JobStatus to, String note, Role role) {
+  /**
+   * Moves the job on. A technician makes only the technician moves, only on a job that is theirs
+   * or not assigned yet, and a move on an unassigned job makes it theirs.
+   */
+  public JobCardView move(long id, JobStatus to, String note, Who who) {
     JobCard job = find(id);
-    if (!role.mayMove(job.getStatus(), to)) {
+    if (!who.role().mayMove(job.getStatus(), to)) {
       throw new AccessDeniedException(
           "A technician cannot move a job from " + job.getStatus() + " to " + to + "; the service advisor does that.");
     }
+    requireMayWorkOn(job, who);
+    boolean claim = who.technician() && who.id() != null && job.getAssignedTo() == null;
     job.moveTo(to, note == null || note.isBlank() ? null : note.trim(), clock.instant());
+    if (claim && !job.getStatus().finished()) {
+      job.assign(staff.getReferenceById(who.id()));
+    }
+    return view(jobs.saveAndFlush(job));
+  }
+
+  /** A technician may change only a job that is theirs or that nobody has yet. */
+  private static void requireMayWorkOn(JobCard job, Who who) {
+    StaffUser assignee = job.getAssignedTo();
+    if (who.technician() && assignee != null && !assignee.getId().equals(who.id())) {
+      throw new AccessDeniedException(
+          "This job is assigned to "
+              + assignee.getDisplayName()
+              + ". Ask the service advisor to reassign it.");
+    }
+  }
+
+  /**
+   * The service advisor gives the job to a technician, or takes it back (null). Only an active
+   * technician can be given a job.
+   */
+  public JobCardView assign(long id, Long staffId) {
+    JobCard job = find(id);
+    StaffUser technician = null;
+    if (staffId != null) {
+      technician =
+          staff
+              .findById(staffId)
+              .filter(u -> u.isActive() && u.getRole() == Role.TECHNICIAN)
+              .orElseThrow(() -> new RuleException("Pick an active technician."));
+    }
+    job.assign(technician);
     return view(jobs.saveAndFlush(job));
   }
 

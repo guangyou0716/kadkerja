@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, ApiError, type JobCard, type LineKind } from '../api'
 import { buttonClass, ErrorNote, Field, inputClass, secondaryButtonClass, StatusBadge } from '../components'
-import { mayMove, useMe } from '../session'
+import { mayMove, mayWorkOn, useMe } from '../session'
 import { customerLink, whatsappText, whatsappUrl } from '../link'
 import { formatRm, parseRm } from '../money'
 import { MOVE_LABEL, STATUS_LABEL, type JobStatus } from '../status'
@@ -33,6 +33,8 @@ export function JobPage() {
   if (job.isPending) return <p className="text-slate-700">Loading job card…</p>
   if (job.isError) return <ErrorNote>{job.error.message}</ErrorNote>
   const j = job.data
+  // A technician can look at someone else's job but not change it (the server refuses too).
+  const mine = mayWorkOn(me, j.assignedTo)
   return (
     <article aria-labelledby="job-title" className="flex flex-col gap-4">
       <Link to="/" className="text-sm font-medium text-teal-800 underline">
@@ -61,13 +63,26 @@ export function JobPage() {
             <dd className="text-slate-900">{j.customer.phone}</dd>
             <dt className="text-slate-600">Complaint</dt>
             <dd className="text-slate-900">{j.complaint}</dd>
+            <dt className="text-slate-600">Technician</dt>
+            <dd className="text-slate-900">
+              {j.assignedTo ? (j.assignedTo.id === me.id ? `${j.assignedTo.name} (you)` : j.assignedTo.name) : 'Not assigned'}
+            </dd>
           </dl>
         </section>
-        <Quote job={j} onSaved={onSaved} />
+        <Quote job={j} onSaved={onSaved} canEdit={mine} />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="flex flex-col gap-4">
-          <Moves job={j} onSaved={onSaved} />
+          {mine ? (
+            <Moves job={j} onSaved={onSaved} />
+          ) : (
+            <section aria-label="Next step" className="rounded-lg bg-white p-4 shadow-sm">
+              <p className="text-sm text-slate-700">
+                This job is assigned to {j.assignedTo?.name}. Ask the service advisor if you should take it over.
+              </p>
+            </section>
+          )}
+          {me.role === 'ADVISOR' && <AssignTechnician job={j} onSaved={onSaved} />}
           {me.role === 'ADVISOR' && <CustomerLink job={j} onSaved={onSaved} />}
         </div>
         <Timeline job={j} />
@@ -76,8 +91,9 @@ export function JobPage() {
   )
 }
 
-function Quote({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }) {
-  const editable = job.status === 'RECEIVED' || job.status === 'INSPECTING'
+function Quote({ job, onSaved, canEdit }: { job: JobCard; onSaved: (j: JobCard) => void; canEdit: boolean }) {
+  const open = job.status === 'RECEIVED' || job.status === 'INSPECTING'
+  const editable = open && canEdit
   const remove = useMutation({ mutationFn: (lineId: number) => api.removeLine(job.id, lineId), onSuccess: onSaved })
   return (
     <section aria-labelledby="quote-title" className="rounded-lg bg-white p-4 shadow-sm lg:col-span-2">
@@ -146,7 +162,7 @@ function Quote({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }
       )}
       {editable ? (
         <AddLine job={job} onSaved={onSaved} />
-      ) : (
+      ) : open ? null : (
         <p className="mt-3 text-xs text-slate-600">
           The quote is locked once sent. To change it, move the job back to inspection.
         </p>
@@ -222,6 +238,60 @@ function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void
       <div className="sm:col-span-3 sm:text-right">
         <button type="submit" className={buttonClass} disabled={add.isPending}>
           Add line
+        </button>
+      </div>
+    </form>
+  )
+}
+
+/** The advisor gives the car to a technician (or takes it back). */
+function AssignTechnician({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }) {
+  const staff = useQuery({ queryKey: ['staff'], queryFn: api.staff })
+  const current = job.assignedTo ? String(job.assignedTo.id) : ''
+  const [picked, setPicked] = useState(current)
+  const [shownFor, setShownFor] = useState(current)
+  // The job changed under us (saved here, or reloaded): show what the server has now.
+  if (shownFor !== current) {
+    setShownFor(current)
+    setPicked(current)
+  }
+  const assign = useMutation({
+    mutationFn: (staffId: number | null) => api.assign(job.id, staffId),
+    onSuccess: onSaved,
+  })
+  if (job.next.length === 0) return null
+  const technicians = (staff.data ?? []).filter((s) => s.role === 'TECHNICIAN' && s.active)
+  // Someone who has since left still shows as the current assignee.
+  const gone = job.assignedTo && !technicians.some((t) => t.id === job.assignedTo!.id) ? job.assignedTo : null
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    assign.mutate(picked === '' ? null : Number(picked))
+  }
+  return (
+    <form onSubmit={submit} aria-labelledby="assign-title" className="flex flex-col gap-3 rounded-lg bg-white p-4 shadow-sm">
+      <h2 id="assign-title" className="font-semibold text-slate-900">
+        Technician
+      </h2>
+      {staff.isError && <ErrorNote>{staff.error.message}</ErrorNote>}
+      {assign.isError && <ErrorNote>{assign.error.message}</ErrorNote>}
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-48 flex-1">
+          <Field label="Assigned to">
+            {(p) => (
+              <select {...p} value={picked} onChange={(e) => setPicked(e.target.value)} disabled={staff.isPending} className={`${inputClass} w-full`}>
+                <option value="">Nobody yet</option>
+                {gone && <option value={String(gone.id)}>{gone.name} (no longer active)</option>}
+                {technicians.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        </div>
+        <button type="submit" className={secondaryButtonClass} disabled={assign.isPending || picked === current}>
+          {picked === '' && current !== '' ? 'Unassign' : 'Assign'}
         </button>
       </div>
     </form>

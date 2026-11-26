@@ -61,6 +61,27 @@ describe('browser demo (whole app on the in-browser backend)', () => {
     expect(await screen.findByText('Wrong username or password.')).toBeInTheDocument()
   })
 
+  it('throws away a saved demo from an older version or a damaged save and starts again', async () => {
+    const old = { version: 1, seq: 0, signedIn: 'advisor', customers: [], vehicles: [], jobs: [] }
+    for (const saved of [JSON.stringify(old), JSON.stringify({ ...old, version: 2 }), '{not json']) {
+      window.localStorage.setItem(STORAGE_KEY, saved)
+      expect((await fetch('/api/auth/me')).status).toBe(401)
+      const state = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)
+      expect(state.version).toBe(2)
+      expect(state.jobs).toHaveLength(5)
+      expect(state.staff.map((s: { username: string }) => s.username)).toEqual(['advisor', 'tech'])
+    }
+  })
+
+  it('the technician finds their cars under My jobs', async () => {
+    renderAt('/my-jobs')
+    await signIn('tech')
+    const todo = await screen.findByRole('region', { name: 'To work on' })
+    expect(within(todo).getByText('BKE 5021')).toBeInTheDocument()
+    expect(within(todo).getByText('PNG 8810')).toBeInTheDocument()
+    expect(screen.getByText('2 to work on · 0 waiting · 0 finished')).toBeInTheDocument()
+  })
+
   it('reset throws the changes away and brings back the sample cars', async () => {
     await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: 'advisor', password: 'demo-kadkerja' }) })
     await fetch('/api/jobs/4/moves', { method: 'POST', body: JSON.stringify({ to: 'CANCELLED' }) })

@@ -35,6 +35,9 @@ public final class Requests {
       @Min(0) @Max(10_000_000) long unitPriceSen,
       boolean taxable) {}
 
+  /** staffId null = nobody. */
+  public record AssignRequest(Long staffId) {}
+
   public record MoveRequest(@NotNull JobStatus to, @Size(max = 500) String note) {}
 
   public record AnswerRequest(

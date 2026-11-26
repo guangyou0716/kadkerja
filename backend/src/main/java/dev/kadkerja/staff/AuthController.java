@@ -48,7 +48,7 @@ public class AuthController {
   public record LoginRequest(
       @NotBlank @Size(max = 40) String username, @NotBlank @Size(max = 200) String password) {}
 
-  public record Me(String username, String name, Role role) {}
+  public record Me(long id, String username, String name, Role role) {}
 
   public record Csrf(String headerName, String token) {}
 
@@ -94,7 +94,7 @@ public class AuthController {
 
   private Me me(Authentication a) {
     StaffUser u = users.findByUsername(a.getName()).orElseThrow();
-    return new Me(u.getUsername(), u.getDisplayName(), u.getRole());
+    return new Me(u.getId(), u.getUsername(), u.getDisplayName(), u.getRole());
   }
 
   private static ResponseEntity<org.springframework.http.ProblemDetail> problem(

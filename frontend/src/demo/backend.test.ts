@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { JobCard, JobSummary, Me, PublicJob } from '../api'
+import type { JobCard, JobSummary, Me, PublicJob, StaffMember } from '../api'
 import { DEMO_PASSWORD, DemoBackend } from './backend'
 
 const NOW = new Date('2026-11-27T02:00:00Z')
@@ -21,7 +21,7 @@ describe('demo backend: sign-in', () => {
     const wrong = b.handle('POST', '/api/auth/login', { username: 'advisor', password: 'nope' })
     expect(wrong).toEqual({ status: 401, body: { detail: 'Wrong username or password.' } })
     const ok = b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD })
-    expect(ok.body).toEqual({ username: 'tech', name: 'Hafiz Demo', role: 'TECHNICIAN' } satisfies Me)
+    expect(ok.body).toEqual({ id: 2, username: 'tech', name: 'Hafiz Demo', role: 'TECHNICIAN' } satisfies Me)
     expect(b.handle('POST', '/api/auth/logout', {}).status).toBe(204)
     expect(b.handle('GET', '/api/auth/me', undefined).status).toBe(401)
   })
@@ -136,5 +136,80 @@ describe('demo backend: customer link', () => {
     expect(fresh.publicToken).not.toBe(j.publicToken)
     expect(b.handle('GET', `/api/public/jobs/${j.publicToken}`, undefined)).toEqual({ status: 404, body: { detail: 'This link is not valid or has expired.' } })
     expect(b.handle('GET', `/api/public/jobs/${fresh.publicToken}`, undefined).status).toBe(200)
+  })
+})
+
+describe('demo backend: technicians', () => {
+  const addTech = (b: DemoBackend, active = true) => {
+    b.state.staff.push({ id: 3, username: 'tech2', name: 'Other Demo', role: 'TECHNICIAN', active })
+  }
+
+  it('the seeded technician has two cars and sees only those in my jobs', () => {
+    const b = signedIn('tech')
+    const mine = b.handle('GET', '/api/jobs?mine=true', undefined).body as JobSummary[]
+    expect(mine.map((j) => [j.plate, j.assignedTo?.name])).toEqual([
+      ['BKE 5021', 'Hafiz Demo'],
+      ['PNG 8810', 'Hafiz Demo'],
+    ])
+    expect(jobs(b).find((j) => j.plate === 'PKR 1234')?.assignedTo).toBeNull()
+  })
+
+  it('the advisor assigns only an active technician, and not on a finished job', () => {
+    const b = signedIn()
+    addTech(b, false)
+    const j = byPlate(b, 'PJM 77')
+    const put = (staffId: unknown) => b.handle('PUT', `/api/jobs/${j.id}/assignee`, { staffId })
+    for (const id of [1, 3, 99]) expect(put(id)).toMatchObject({ status: 409, body: { detail: 'Pick an active technician.' } })
+    expect(put('x').status).toBe(400)
+    expect((put(2).body as JobCard).assignedTo).toEqual({ id: 2, name: 'Hafiz Demo' })
+    expect((put(null).body as JobCard).assignedTo).toBeNull()
+    b.handle('POST', `/api/jobs/${j.id}/moves`, { to: 'CANCELLED' })
+    expect(put(2)).toMatchObject({ status: 409, body: { detail: 'A CANCELLED job cannot be reassigned.' } })
+  })
+
+  it('a technician cannot assign, list staff, or work on another technician\'s car', () => {
+    const b = signedIn()
+    addTech(b)
+    const received = byPlate(b, 'PJM 77')
+    b.handle('PUT', `/api/jobs/${received.id}/assignee`, { staffId: 3 })
+    b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD })
+    expect(b.handle('GET', '/api/staff', undefined).status).toBe(403)
+    expect(b.handle('PUT', `/api/jobs/${received.id}/assignee`, { staffId: 2 }).status).toBe(403)
+    expect(b.handle('POST', `/api/jobs/${received.id}/moves`, { to: 'INSPECTING' })).toMatchObject({
+      status: 403,
+      body: { detail: 'This job is assigned to Other Demo. Ask the service advisor to reassign it.' },
+    })
+    expect(b.handle('POST', `/api/jobs/${received.id}/lines`, { kind: 'PART', description: 'x', quantity: 1, unitPriceSen: 1, taxable: true }).status).toBe(403)
+  })
+
+  it('a technician who starts an unassigned car takes it; a refused move does not', () => {
+    const b = signedIn('tech')
+    const received = byPlate(b, 'PJM 77')
+    expect(b.handle('POST', `/api/jobs/${received.id}/moves`, { to: 'CANCELLED' }).status).toBe(403)
+    expect(card(b, received.id).assignedTo).toBeNull()
+    const started = b.handle('POST', `/api/jobs/${received.id}/moves`, { to: 'INSPECTING' }).body as JobCard
+    expect(started.assignedTo).toEqual({ id: 2, name: 'Hafiz Demo' })
+  })
+
+  it('the staff list is active people first and has no passwords', () => {
+    const b = signedIn()
+    addTech(b, false)
+    const list = b.handle('GET', '/api/staff', undefined).body as StaffMember[]
+    expect(list.map((s) => [s.username, s.active])).toEqual([
+      ['advisor', true],
+      ['tech', true],
+      ['tech2', false],
+    ])
+    expect(JSON.stringify(list)).not.toMatch(/password/i)
+  })
+
+  it('a deactivated account cannot sign in and is signed out', () => {
+    const b = signedIn('tech')
+    b.state.staff[1].active = false
+    expect(b.handle('GET', '/api/auth/me', undefined).status).toBe(401)
+    expect(b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD })).toEqual({
+      status: 401,
+      body: { detail: 'Wrong username or password.' },
+    })
   })
 })
