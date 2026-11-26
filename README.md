@@ -268,6 +268,9 @@ cd frontend
 npm install
 npm run dev                                               # http://localhost:5173 (proxies /api to :8080)
 npm test                                                  # frontend tests
+npm run build && npx vite preview                         # the built app on :4173 (also proxies /api)
+E2E_BASE_URL=http://localhost:4173 npm run e2e             # Playwright end-to-end tests (API with the demo
+                                                          # profile running; npx playwright install chromium)
 
 npm run dev:demo                                          # the browser-only demo (no backend needed)
 npm run build:demo                                        # -> frontend/dist-demo (static files)
@@ -376,9 +379,19 @@ docker compose down -v     # stop and delete the data
   flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, the parts shelf and its count-down on approval, photos (the same rules as the server, the storage limits, a
   full browser storage refused with nothing changed), form checks, what the customer link hides,
   new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
+- End-to-end tests (Playwright, `frontend/e2e`, 4 tests in a real Chromium against the running stack, each with its
+  own random made-up plate so they can run again on the same database): a car from check-in to collection (the
+  advisor writes a quote with a line from stock, uploads a before photo, gives the car to the technician and
+  sends the quote; the customer opens the link in a separate phone-sized browser with no cookies, sees the total
+  and the photo but not the customer's name, and approves; staff see "by customer (link)" and the pads counted
+  down by one; the technician finds the car in *My jobs*, repairs it and marks it ready; the advisor hands it back
+  and the customer's page says collected); a quote redone while the customer's page is open (the old approval
+  is refused, the page shows version 2, declining with a reason reaches the staff timeline); a made-up link; a
+  wrong password and sign-out ending the session on the server.
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), the frontend's lint (oxlint), typecheck, tests and build, and the Docker Compose
-  stack built, started and smoke-tested through nginx.
+  stack built and started, then Playwright end-to-end tests in a real Chromium through nginx to the API and
+  PostgreSQL, then the smoke test.
 
 ## Roadmap
 
@@ -388,8 +401,8 @@ docker compose down -v     # stop and delete the data
 4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs", staff
    management (add, deactivate/reactivate, set and change passwords; sessions end when an account changes).
 5. ✅ Parts stock deducted on approval, before/after photos per job card.
-6. Docker Compose ✅ (PostgreSQL + API + nginx, started and smoke-tested in CI); next: Bahasa Melayu and 简体中文,
-   accessibility pass, Playwright end-to-end tests, demo GIF.
+6. Docker Compose ✅ (PostgreSQL + API + nginx, started and smoke-tested in CI), Playwright end-to-end tests ✅
+   (in CI against that stack); next: Bahasa Melayu and 简体中文, accessibility pass, demo GIF.
 
 ## Privacy
 

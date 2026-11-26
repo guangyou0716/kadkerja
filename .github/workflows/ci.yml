@@ -77,9 +77,9 @@ jobs:
       - run: npm run build
 
   compose:
-    name: docker compose (PostgreSQL + API + web)
+    name: docker compose (PostgreSQL + API + web) + Playwright e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       KADKERJA_PROFILES: postgres,demo
     steps:
@@ -87,6 +87,25 @@ jobs:
       - run: docker compose config --quiet
       - name: Build and start the stack
         run: docker compose up -d --build --wait --wait-timeout 300
+      # In Playwright's own image (browser + system libraries ready; no apt on the runner), the version taken
+      # from package-lock.json so the image always matches @playwright/test.
+      - name: Playwright end-to-end tests (real Chromium -> nginx -> API -> PostgreSQL)
+        run: |
+          v=$(node -p "require('./frontend/package-lock.json').packages['node_modules/@playwright/test'].version")
+          echo "Playwright $v"
+          docker run --rm --network host --ipc=host -e CI=1 -e E2E_BASE_URL=http://localhost:8081 \
+            -v "$PWD/frontend:/work" -w /work "mcr.microsoft.com/playwright:v$v-noble" \
+            bash -c 'npm ci --no-audit --no-fund && npx playwright test'
+      - name: Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+      # After the e2e tests: the smoke test blocks the demo user "tech" from this machine on purpose.
       - name: Smoke test through nginx
         run: scripts/compose-smoke.sh http://localhost:8081
       - name: Restart keeps the data (PostgreSQL volume, demo data not added twice)
