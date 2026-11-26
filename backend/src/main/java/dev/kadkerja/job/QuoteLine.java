@@ -1,5 +1,6 @@
 package dev.kadkerja.job;
 
+import dev.kadkerja.stock.Part;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -40,6 +41,11 @@ public class QuoteLine {
   @Column(nullable = false)
   private boolean taxable;
 
+  /** The stock part this line uses (taken off the shelf when the quote is approved), or null. */
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "part_id")
+  private Part part;
+
   protected QuoteLine() {}
 
   QuoteLine(
@@ -48,13 +54,15 @@ public class QuoteLine {
       String description,
       int quantity,
       long unitPriceSen,
-      boolean taxable) {
+      boolean taxable,
+      Part part) {
     this.jobCard = jobCard;
     this.kind = kind;
     this.description = description;
     this.quantity = quantity;
     this.unitPriceSen = unitPriceSen;
     this.taxable = taxable;
+    this.part = part;
   }
 
   public Long getId() {
@@ -79,6 +87,10 @@ public class QuoteLine {
 
   public boolean isTaxable() {
     return taxable;
+  }
+
+  public Part getPart() {
+    return part;
   }
 
   public long subtotalSen() {

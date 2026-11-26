@@ -6,8 +6,9 @@
 the front desk writes down the complaint, the mechanic finds the problem, someone phones the customer with a
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
-Status: **work in progress** (increments 1-4 of 6: the API, the staff web app, the customer's progress link,
-staff sign-in with roles, technician assignment, "My jobs" and staff management). Plan in [Roadmap](#roadmap).
+Status: **work in progress** (increments 1-4 of 6 and the parts half of 5: the API, the staff web app, the
+customer's progress link, staff sign-in with roles, technician assignment, "My jobs", staff management, and a
+parts shelf that is counted down when a quote is approved). Plan in [Roadmap](#roadmap).
 
 **Try it: [kadkerja-demo.guangyou.workers.dev](https://kadkerja-demo.guangyou.workers.dev)** (browser-only demo).
 Sign in as `advisor` (service advisor) or `tech` (technician), password `demo-kadkerja`. Open the quoted job
@@ -130,6 +131,27 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
 
 <img src="docs/check-in-errors.png" alt="Check-in form after submitting with mistakes: each field shows its own message, like 'use a Malaysian phone number like 012-3456789'" width="560">
 
+### Parts stock
+
+- **Parts page** (everyone can look; the service advisor changes it): part number, name, price and the count on
+  the shelf, marked *Low* at or below its reorder level, and *N to order* when the count is below zero.
+- **Quote lines from stock**: *From stock* on the quote form fills in the part's name and price (both can still
+  be changed) and links the line to the part. Labour lines never take a part.
+- **Counted down on approval, once**: when the quote is approved, by the customer on their link or by the
+  advisor (*Customer approved* after a phone call), every stock line comes off the shelf in the same database
+  transaction as the approval. Sending, redoing, declining or cancelling a quote takes nothing, and an approved
+  job cannot be approved again. Approval is never refused for an empty shelf: the count goes below zero and the
+  page shows how many to order.
+- **No lost counts**: the parts are locked in id order while they are counted down, so two approvals at the same
+  moment wait for each other (tested with six approvals at once); each part also has a version check.
+- **History**: every change is written down (first count, delivery received, stocktake difference, taken for
+  job KK-...), with who did it ("customer approved" when it came from the link).
+
+<p>
+  <img src="docs/parts.png" alt="Parts page: four parts with part number, name, price and count; the ignition coil shows 0 and Low; its history shows -1 taken for KK-2026-0003 and +1 counted; a form to add a part" width="560">
+  <img src="docs/quote-from-stock.png" alt="Job card being inspected: a quote line marked 'stock BP-MYV-F' and the From stock picker filling in engine oil at RM 115.00" width="560">
+</p>
+
 ### API (Spring Boot)
 
 
@@ -159,7 +181,7 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
 
 ## API
 
-Everything under `/api/jobs` needs a signed-in session (and the CSRF header for changes); `/api/public/...` does not.
+Everything under `/api/jobs`, `/api/parts` and `/api/staff` needs a signed-in session (and the CSRF header for changes); `/api/public/...` does not.
 
 | Method | Path | What |
 | --- | --- | --- |
@@ -171,11 +193,16 @@ Everything under `/api/jobs` needs a signed-in session (and the CSRF header for 
 | `GET` | `/api/jobs?mine=true` | Job cards assigned to the signed-in person |
 | `POST` | `/api/jobs` | Check in a car (creates the job card) |
 | `GET` | `/api/jobs/{id}` | Job card with vehicle, customer, quote lines, totals, timeline, next moves |
-| `POST` | `/api/jobs/{id}/lines` | Add a quote line `{kind: LABOUR/PART, description, quantity, unitPriceSen, taxable}` |
+| `POST` | `/api/jobs/{id}/lines` | Add a quote line `{kind: LABOUR/PART, description, quantity, unitPriceSen, taxable, partId?}` |
 | `DELETE` | `/api/jobs/{id}/lines/{lineId}` | Remove a quote line |
 | `POST` | `/api/jobs/{id}/moves` | Move the job `{to, note?}` |
 | `POST` | `/api/jobs/{id}/link` | Make a new customer link (the old one stops working) |
 | `PUT` | `/api/jobs/{id}/assignee` | Advisor: give the job to a technician `{staffId}` (`null` = nobody) |
+| `GET` | `/api/parts` | The parts shelf (part number, name, price, on hand, reorder level, low) |
+| `POST` | `/api/parts` | Advisor: add a part `{sku, name, unitPriceSen, onHand, reorderLevel}` |
+| `POST` | `/api/parts/{id}/receive` | Advisor: a delivery arrived `{quantity}` |
+| `POST` | `/api/parts/{id}/count` | Advisor: stocktake `{onHand}` (the difference is written down) |
+| `GET` | `/api/parts/{id}/movements` | Last 50 changes to a part, newest first |
 | `GET` | `/api/staff` | Advisor: staff list (id, username, name, role, active; never password hashes) |
 | `POST` | `/api/staff` | Advisor: add someone `{username, name, role, password}` |
 | `POST` | `/api/staff/{id}/deactivate` | Advisor: stop them signing in, end their sessions, hand back their open jobs |
@@ -230,7 +257,7 @@ the schema.
   live in one file (`frontend/src/status.ts`); the allowed moves always come from the server.
 - The rules live in the domain (`JobStatus`, `JobCard`): every change goes through methods that check them, so
   no caller can skip a step. Views are built inside the service transaction (`open-in-view` is off).
-- Backend tests (68): every one of the 81 status pairs is checked against an independent table, every status is
+- Backend tests (81): every one of the 81 status pairs is checked against an independent table, every status is
   reachable and none is a dead end; 2,000 random quotes add up exactly (lines, tax, total) and per-line tax is
   never more than half a sen off; the whole flow through the HTTP API with MockMvc; refused moves and edits
   change nothing; field-by-field validation; plate reuse, owner changes and the one-open-job rule; the token never leaks; demo
@@ -250,8 +277,13 @@ the schema.
   only), deactivating ends the person's live session and refuses sign-in while the customer link keeps working in
   that browser, open jobs handed back and finished ones kept, reactivating, no self-deactivation, the last-advisor
   rule, a new password from the advisor ends old sessions, changing your own keeps this session and ends the others,
-  and guessing the current password is limited. A V3-era account migrates with session counter 0.
-- Frontend tests (84, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+  and guessing the current password is limited. A V3-era account migrates with session counter 0. Parts stock:
+  advisor-only changes, part number rules, taken part numbers in any letter case, receive and stocktake
+  history; a part only on a part line; approval by the customer or the advisor counts down once (several lines of
+  one part added up), declined, cancelled and redone quotes take nothing, a short shelf goes below zero, the
+  customer view shows no part ids, six approvals at the same moment lose no count (fails without the row lock),
+  and old quote lines migrate with no part.
+- Frontend tests (98, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
@@ -263,9 +295,12 @@ the schema.
   technicians offered, one who has left still shown, unassign), another technician's car is read-only, *My jobs*
   order and empty state, who has each car on the board; the Staff page (own row without buttons, add with a taken
   username shown on the field, deactivate only after confirming, set a password with the server's check on the
-  field, hidden from technicians) and *My password* (repeat checked before sending, wrong current password). Price parsing round-trips every formatted amount.
+  field, hidden from technicians) and *My password* (repeat checked before sending, wrong current password); the Parts
+  page (to-order and low marks, read-only for technicians, history linking to the job, receive and stocktake with
+  checks before sending, add with a taken part number on the field) and *From stock* on the quote form (fills the
+  line, sends the part id, labour drops it). Price parsing round-trips every formatted amount.
   Browser demo: the in-browser stand-in's sign-in, seed totals, the whole check-in -> quote -> customer approval
-  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, form checks, what the customer link hides,
+  flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, the parts shelf and its count-down on approval, form checks, what the customer link hides,
   new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), and the frontend's lint (oxlint), typecheck, tests and build.
@@ -277,7 +312,7 @@ the schema.
 3. ✅ Customer progress link (no login): timeline, quote, approve/decline with a stale-quote guard, WhatsApp text.
 4. ✅ Staff sign-in (Spring Security; advisor and technician roles), technician assignment, "My jobs", staff
    management (add, deactivate/reactivate, set and change passwords; sessions end when an account changes).
-5. Before/after photos, parts stock deducted on approval.
+5. Parts stock deducted on approval (✅), before/after photos per job card (next).
 6. Bahasa Melayu and 简体中文, accessibility pass, Docker Compose, Playwright end-to-end tests, demo GIF.
 
 ## Privacy

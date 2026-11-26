@@ -8,6 +8,7 @@ import { CheckInPage } from './pages/CheckInPage'
 import { CustomerPage } from './pages/CustomerPage'
 import { JobPage } from './pages/JobPage'
 import { MyJobs } from './pages/MyJobs'
+import { PartsPage } from './pages/PartsPage'
 import { StaffPage } from './pages/StaffPage'
 
 const nav = ({ isActive }: { isActive: boolean }) =>
@@ -42,6 +43,9 @@ function StaffApp({ me }: { me: Me }) {
                 My jobs
               </NavLink>
             )}
+            <NavLink to="/parts" className={nav}>
+              Parts
+            </NavLink>
           </nav>
           <div className="flex flex-wrap items-center gap-x-2 text-sm text-teal-50">
             <span>
@@ -63,6 +67,7 @@ function StaffApp({ me }: { me: Me }) {
           />
           <Route path="/my-jobs" element={<MyJobs />} />
           <Route path="/account" element={<AccountPage />} />
+          <Route path="/parts" element={<PartsPage />} />
           <Route
             path="/staff"
             element={advisor ? <StaffPage /> : <p className="text-slate-800">Only the service advisor manages staff.</p>}

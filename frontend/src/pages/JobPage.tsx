@@ -123,6 +123,11 @@ function Quote({ job, onSaved, canEdit }: { job: JobCard; onSaved: (j: JobCard) 
                       {l.kind === 'LABOUR' ? 'Labour' : 'Part'}
                     </span>
                     {l.description}
+                    {l.partSku && (
+                      <span className="ml-2 rounded bg-teal-50 px-1.5 font-mono text-xs text-teal-900" title="Taken from stock when the quote is approved">
+                        stock {l.partSku}
+                      </span>
+                    )}
                     {!l.taxable && <span className="ml-1 text-xs text-slate-600">(no SST)</span>}
                   </td>
                   <td className="py-1.5 pr-2 text-right whitespace-nowrap tabular-nums">{l.quantity}</td>
@@ -173,6 +178,27 @@ function Quote({ job, onSaved, canEdit }: { job: JobCard; onSaved: (j: JobCard) 
 
 function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void }) {
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const parts = useQuery({ queryKey: ['parts'], queryFn: api.parts })
+  // Picking a stock part fills in the line; the description and price can still be changed.
+  const [partId, setPartId] = useState('')
+  const [kind, setKind] = useState<LineKind>('PART')
+  const [description, setDescription] = useState('')
+  const [price, setPrice] = useState('')
+  const clear = () => {
+    setPartId('')
+    setKind('PART')
+    setDescription('')
+    setPrice('')
+  }
+  function pick(id: string) {
+    setPartId(id)
+    const part = parts.data?.find((p) => String(p.id) === id)
+    if (part) {
+      setKind('PART')
+      setDescription(part.name)
+      setPrice((part.unitPriceSen / 100).toFixed(2))
+    }
+  }
   const add = useMutation({
     mutationFn: (line: Parameters<typeof api.addLine>[1]) => api.addLine(job.id, line),
     onSuccess: onSaved,
@@ -182,22 +208,28 @@ function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void
     e.preventDefault()
     const form = e.currentTarget
     const f = new FormData(form)
-    const price = parseRm(String(f.get('price') ?? ''))
+    const priceSen = parseRm(price)
     const quantity = Number(f.get('quantity'))
     const local: Record<string, string> = {}
-    if (price == null) local.unitPriceSen = 'Use an amount like 45 or 45.50'
+    if (priceSen == null) local.unitPriceSen = 'Use an amount like 45 or 45.50'
     if (!Number.isInteger(quantity) || quantity < 1) local.quantity = 'At least 1'
     setErrors(local)
     if (Object.keys(local).length > 0) return
     add.mutate(
       {
-        kind: f.get('kind') as LineKind,
-        description: String(f.get('description') ?? ''),
+        kind,
+        description,
         quantity,
-        unitPriceSen: price!,
+        unitPriceSen: priceSen!,
         taxable: f.get('taxable') === 'on',
+        ...(partId && kind === 'PART' ? { partId: Number(partId) } : {}),
       },
-      { onSuccess: () => form.reset() },
+      {
+        onSuccess: () => {
+          form.reset()
+          clear()
+        },
+      },
     )
   }
   return (
@@ -207,10 +239,34 @@ function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void
           <ErrorNote>{add.error.message}</ErrorNote>
         </div>
       )}
+      <div className="sm:col-span-6">
+        <Field label="From stock" hint="Optional. The part comes off the shelf when the quote is approved.">
+          {(p) => (
+            <select {...p} name="partId" className={inputClass} value={partId} onChange={(e) => pick(e.target.value)}>
+              <option value="">Not from stock</option>
+              {(parts.data ?? []).map((part) => (
+                <option key={part.id} value={part.id}>
+                  {part.sku} · {part.name} ({part.onHand} on hand)
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      </div>
       <div className="sm:col-span-1">
         <Field label="Kind">
           {(p) => (
-            <select {...p} name="kind" className={inputClass} defaultValue="PART">
+            <select
+              {...p}
+              name="kind"
+              className={inputClass}
+              value={kind}
+              onChange={(e) => {
+                setKind(e.target.value as LineKind)
+                // Labour never takes a part from the shelf.
+                if (e.target.value === 'LABOUR') setPartId('')
+              }}
+            >
               <option value="PART">Part</option>
               <option value="LABOUR">Labour</option>
             </select>
@@ -219,7 +275,7 @@ function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void
       </div>
       <div className="sm:col-span-3">
         <Field label="Description" error={errors.description}>
-          {(p) => <input {...p} name="description" className={inputClass} />}
+          {(p) => <input {...p} name="description" className={inputClass} value={description} onChange={(e) => setDescription(e.target.value)} />}
         </Field>
       </div>
       <div className="sm:col-span-1">
@@ -229,7 +285,7 @@ function AddLine({ job, onSaved }: { job: JobCard; onSaved: (j: JobCard) => void
       </div>
       <div className="sm:col-span-1">
         <Field label="Unit price (RM)" error={errors.unitPriceSen}>
-          {(p) => <input {...p} name="price" inputMode="decimal" className={inputClass} />}
+          {(p) => <input {...p} name="price" inputMode="decimal" className={inputClass} value={price} onChange={(e) => setPrice(e.target.value)} />}
         </Field>
       </div>
       <label className="flex items-center gap-2 text-sm text-slate-800 sm:col-span-3">

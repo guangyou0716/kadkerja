@@ -94,6 +94,9 @@ public class SecurityConfig {
                     .hasRole(Role.ADVISOR.name())
                     .requestMatchers(HttpMethod.PUT, "/api/jobs/*/assignee")
                     .hasRole(Role.ADVISOR.name())
+                    // Everyone sees the parts shelf; only the advisor adds parts or changes counts.
+                    .requestMatchers(HttpMethod.POST, "/api/parts", "/api/parts/**")
+                    .hasRole(Role.ADVISOR.name())
                     .requestMatchers("/api/staff", "/api/staff/**")
                     .hasRole(Role.ADVISOR.name())
                     .requestMatchers("/api/**")

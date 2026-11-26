@@ -28,6 +28,10 @@ class MigrationTest {
             + " values (1, null, 'RECEIVED', TIMESTAMP WITH TIME ZONE '2026-01-01 00:00:00+00', null),"
             + " (1, 'RECEIVED', 'QUOTED', TIMESTAMP WITH TIME ZONE '2026-01-01 01:00:00+00', 'old note')");
 
+    jdbc.update(
+        "insert into quote_line (job_card_id, kind, description, quantity, unit_price_sen, taxable)"
+            + " values (1, 'PART', 'Old pads', 1, 9000, true)");
+
     // An account made under V3 (before session epochs existed).
     Flyway.configure().dataSource(ds).target("3").load().migrate();
     jdbc.update(
@@ -47,5 +51,9 @@ class MigrationTest {
     // V5: accounts from before keep working (session epoch 0, still active).
     assertThat(jdbc.queryForObject("select session_epoch from staff_user where username = 'old'", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("select active from staff_user where username = 'old'", Boolean.class)).isTrue();
+    // V6: quote lines from before stock existed use no stock part, and the shelf starts empty.
+    assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(6);
+    assertThat(jdbc.queryForObject("select count(*) from quote_line where part_id is null", Integer.class)).isEqualTo(1);
+    assertThat(jdbc.queryForObject("select count(*) from part", Integer.class)).isZero();
   }
 }

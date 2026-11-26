@@ -76,7 +76,14 @@ public class JobCardController {
   public JobCardView addLine(
       @PathVariable long id, @Valid @RequestBody LineRequest r, Authentication who) {
     return service.addLine(
-        id, r.kind(), r.description(), r.quantity(), r.unitPriceSen(), r.taxable(), who(who));
+        id,
+        r.kind(),
+        r.description(),
+        r.quantity(),
+        r.unitPriceSen(),
+        r.taxable(),
+        r.partId(),
+        who(who));
   }
 
   @DeleteMapping("/{id}/lines/{lineId}")

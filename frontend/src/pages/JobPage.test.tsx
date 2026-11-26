@@ -232,4 +232,47 @@ describe('JobPage technician', () => {
     renderAt('/jobs/7')
     expect(await screen.findByRole('button', { name: 'Start inspection' })).toBeInTheDocument()
   })
+
+  it('picks a part from stock: it fills the line and sends the part id', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi((url, init) =>
+      init?.method === 'POST' && url.endsWith('/lines') ? { body: job() } : { body: job() },
+    )
+    renderAt('/jobs/7')
+    await screen.findByRole('heading', { name: 'PKR 1234' })
+    const picker = await screen.findByLabelText('From stock')
+    await screen.findByRole('option', { name: 'BP-MYV-F · Front brake pads (set) (6 on hand)' })
+    await user.selectOptions(picker, '31')
+    expect(screen.getByLabelText('Description')).toHaveValue('Front brake pads (set)')
+    expect(screen.getByLabelText('Unit price (RM)')).toHaveValue('128.00')
+    await user.clear(screen.getByLabelText('Unit price (RM)'))
+    await user.type(screen.getByLabelText('Unit price (RM)'), '120')
+    await user.click(screen.getByRole('button', { name: 'Add line' }))
+    await waitFor(() => expect(api.mock.calls.some(([u, i]) => u === '/api/jobs/7/lines' && i?.method === 'POST')).toBe(true))
+    const [, init] = api.mock.calls.find(([u, i]) => u === '/api/jobs/7/lines' && i?.method === 'POST')!
+    expect(bodyOf(init)).toEqual({ kind: 'PART', description: 'Front brake pads (set)', quantity: 1, unitPriceSen: 12000, taxable: true, partId: 31 })
+    // The form is empty again after saving.
+    await waitFor(() => expect(screen.getByLabelText('From stock')).toHaveValue(''))
+  })
+
+  it('switching to labour drops the stock part', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi(() => ({ body: job() }))
+    renderAt('/jobs/7')
+    await screen.findByRole('option', { name: 'BP-MYV-F · Front brake pads (set) (6 on hand)' })
+    await user.selectOptions(screen.getByLabelText('From stock'), '31')
+    await user.selectOptions(screen.getByLabelText('Kind'), 'LABOUR')
+    expect(screen.getByLabelText('From stock')).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: 'Add line' }))
+    await waitFor(() => expect(api.mock.calls.some(([u, i]) => u === '/api/jobs/7/lines' && i?.method === 'POST')).toBe(true))
+    const [, init] = api.mock.calls.find(([u, i]) => u === '/api/jobs/7/lines' && i?.method === 'POST')!
+    expect(bodyOf(init)).not.toHaveProperty('partId')
+  })
+
+  it('marks a line that takes a stock part', async () => {
+    const base = job()
+    fakeApi(() => ({ body: job({ lines: [base.lines[0], { ...base.lines[1], partId: 31, partSku: 'BP-MYV-F' }] }) }))
+    renderAt('/jobs/7')
+    expect(await screen.findByText('stock BP-MYV-F')).toBeInTheDocument()
+  })
 })

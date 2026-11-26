@@ -45,7 +45,7 @@ public class ErrorHandler extends ResponseEntityExceptionHandler {
     return problem(HttpStatus.NOT_FOUND, "Not found", e.getMessage());
   }
 
-  /** Two changes at the same moment (a version check or a unique plate written twice). */
+  /** Two changes at the same moment (a version check, or a unique plate or part number written twice). */
   @ExceptionHandler({
     ObjectOptimisticLockingFailureException.class,
     DataIntegrityViolationException.class
@@ -54,7 +54,7 @@ public class ErrorHandler extends ResponseEntityExceptionHandler {
     return problem(
         HttpStatus.CONFLICT,
         "Changed by someone else",
-        "This job card was changed at the same time by someone else. Reload and try again.");
+        "This was changed at the same time by someone else. Reload and try again.");
   }
 
   @Override

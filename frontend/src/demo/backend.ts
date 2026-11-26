@@ -7,7 +7,7 @@
  * It is NOT security: everything lives in the visitor's own browser. The real server does sign-in,
  * CSRF, rate limits and link expiry; here they are skipped or simplified.
  */
-import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, PublicJob, Role, StaffMember } from '../api'
+import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, Part, PublicJob, Role, StaffMember, StockMovement } from '../api'
 import { STATUSES, type JobStatus } from '../status'
 
 /** Published demo sign-ins (same as the server's demo profile). */
@@ -34,6 +34,20 @@ interface Line {
   quantity: number
   unitPriceSen: number
   taxable: boolean
+  /** The stock part this line takes when the quote is approved, or null. */
+  partId: number | null
+}
+/** A part on the shelf (stored without the derived "low"). */
+type DemoPart = Omit<Part, 'low'>
+/** A change to a part's count; jobId only for parts taken for a job. */
+interface Movement {
+  id: number
+  partId: number
+  jobId: number | null
+  change: number
+  reason: StockMovement['reason']
+  at: string
+  by: string | null
 }
 interface Event {
   from: JobStatus | null
@@ -73,14 +87,19 @@ interface Customer {
 
 /** Everything the demo remembers (saved as JSON in localStorage). */
 export interface DemoState {
-  /** 3 added staff management (2 added assignment); older saved demos are thrown away and seeded again. */
-  version: 3
+  /**
+   * 4 added the parts shelf (3 staff management, 2 assignment); older saved demos are thrown away
+   * and seeded again.
+   */
+  version: 4
   seq: number
   signedIn: string | null
   staff: DemoStaff[]
   customers: Customer[]
   vehicles: Vehicle[]
   jobs: Job[]
+  parts: DemoPart[]
+  movements: Movement[]
 }
 
 export interface DemoResponse {
@@ -153,19 +172,36 @@ export class DemoBackend {
   /** A fresh demo workshop: two staff, five cars at different steps. Names and numbers are made up. */
   static seeded(now: () => Date = () => new Date()): DemoBackend {
     const b = new DemoBackend(
-      { version: 3, seq: 0, signedIn: null, staff: DEMO_STAFF.map((s) => ({ ...s, password: DEMO_PASSWORD })), customers: [], vehicles: [], jobs: [] },
+      {
+        version: 4,
+        seq: 0,
+        signedIn: null,
+        staff: DEMO_STAFF.map((s) => ({ ...s, password: DEMO_PASSWORD })),
+        customers: [],
+        vehicles: [],
+        jobs: [],
+        parts: [],
+        movements: [],
+      },
       now,
     )
     const ago = (minutes: number) => new Date(now().getTime() - minutes * 60_000).toISOString()
     const staffMove = (id: number, to: JobStatus, at: string, note: string | null = null) => b.move(id, to, note, FRONT_DESK, at)
+    // A small shelf (made-up part numbers, as on the server's demo profile).
+    const shelf = (sku: string, name: string, unitPriceSen: number, onHand: number, reorderLevel: number) =>
+      b.addPart({ sku, name, unitPriceSen, onHand, reorderLevel }, 'Front desk', ago(600)).id
+    const pads = shelf('BP-MYV-F', 'Front brake pads (set)', 12800, 6, 2)
+    const oil = shelf('OIL-5W30-4', 'Engine oil 5W-30, 4 L', 11500, 3, 4)
+    const coil = shelf('IGN-SAGA', 'Ignition coil', 18000, 1, 1)
+    const battery = shelf('BAT-NS40ZL', 'Battery NS40ZL', 23000, 4, 1)
 
     const a = b.checkIn(
       { customerName: 'Aiman Demo', phone: '012-0000001', plate: 'PKR 1234', make: 'Perodua', model: 'Myvi', year: 2019, mileageKm: 84210, complaint: 'Squeaking brakes at low speed; service due.' },
       ago(180),
     )
     b.addLine(a.id, { kind: 'LABOUR', description: 'Brake inspection and service', quantity: 1, unitPriceSen: 6000, taxable: true })
-    b.addLine(a.id, { kind: 'PART', description: 'Front brake pads (set)', quantity: 1, unitPriceSen: 12800, taxable: true })
-    b.addLine(a.id, { kind: 'PART', description: 'Engine oil 5W-30, 4 L', quantity: 1, unitPriceSen: 11500, taxable: true })
+    b.addLine(a.id, { kind: 'PART', description: 'Front brake pads (set)', quantity: 1, unitPriceSen: 12800, taxable: true, partId: pads })
+    b.addLine(a.id, { kind: 'PART', description: 'Engine oil 5W-30, 4 L', quantity: 1, unitPriceSen: 11500, taxable: true, partId: oil })
     staffMove(a.id, 'INSPECTING', ago(170))
     staffMove(a.id, 'QUOTED', ago(120), 'Pads at 2 mm; oil change due.')
 
@@ -180,7 +216,7 @@ export class DemoBackend {
       ago(300),
     )
     b.addLine(k.id, { kind: 'LABOUR', description: 'Diagnostic scan', quantity: 1, unitPriceSen: 5000, taxable: true })
-    b.addLine(k.id, { kind: 'PART', description: 'Ignition coil', quantity: 1, unitPriceSen: 18000, taxable: true })
+    b.addLine(k.id, { kind: 'PART', description: 'Ignition coil', quantity: 1, unitPriceSen: 18000, taxable: true, partId: coil })
     staffMove(k.id, 'INSPECTING', ago(290))
     staffMove(k.id, 'QUOTED', ago(250))
     staffMove(k.id, 'APPROVED', ago(240), 'Approved by phone.')
@@ -198,7 +234,7 @@ export class DemoBackend {
       { customerName: 'Wong Demo', phone: '012-0000005', plate: 'WXY 3388', make: 'Perodua', model: 'Axia', year: 2015, mileageKm: 151200, complaint: 'Battery flat in the morning.' },
       ago(420),
     )
-    b.addLine(w.id, { kind: 'PART', description: 'Battery NS40ZL', quantity: 1, unitPriceSen: 23000, taxable: true })
+    b.addLine(w.id, { kind: 'PART', description: 'Battery NS40ZL', quantity: 1, unitPriceSen: 23000, taxable: true, partId: battery })
     b.addLine(w.id, { kind: 'LABOUR', description: 'Charging system test', quantity: 1, unitPriceSen: 3000, taxable: false })
     staffMove(w.id, 'INSPECTING', ago(410))
     staffMove(w.id, 'QUOTED', ago(390))
@@ -254,6 +290,7 @@ export class DemoBackend {
       const sm = /^\/api\/staff\/(\d+)\/(deactivate|activate|password)$/.exec(path)
       if (sm && method === 'POST') return { status: 200, body: this.staffAction(me, Number(sm[1]), sm[2], body) }
     }
+    if (path === '/api/parts' || path.startsWith('/api/parts/')) return this.partsRoute(method, path, body, me)
     if (path === '/api/jobs') {
       if (method === 'GET') return { status: 200, body: this.list(query.get('mine') === 'true' ? me.id : undefined) }
       if (method === 'POST') {
@@ -289,6 +326,83 @@ export class DemoBackend {
       }
     }
     throw new Problem(404, 'Not found.')
+  }
+
+  // ---- parts shelf ----
+
+  private partsRoute(method: string, path: string, body: Record<string, unknown>, me: Me): DemoResponse {
+    if (method === 'GET' && path === '/api/parts') return { status: 200, body: this.partList() }
+    const hm = /^\/api\/parts\/(\d+)\/movements$/.exec(path)
+    if (method === 'GET' && hm) return { status: 200, body: this.history(Number(hm[1])) }
+    if (method !== 'POST') throw new Problem(404, 'Not found.')
+    // Everyone sees the shelf; only the advisor changes it.
+    if (me.role !== 'ADVISOR') throw new Problem(403, 'Your role cannot do this, or the page is out of date (reload and try again).')
+    if (path === '/api/parts') return { status: 201, body: asPart(this.addPart(validPart(body), me.name)) }
+    const cm = /^\/api\/parts\/(\d+)\/(receive|count)$/.exec(path)
+    if (!cm) throw new Problem(404, 'Not found.')
+    const part = this.part(Number(cm[1]))
+    const at = this.now().toISOString()
+    if (cm[2] === 'receive') {
+      const quantity = wholeNumber(body, 'quantity', 1, 9_999)
+      part.onHand += quantity
+      this.record(part.id, null, quantity, 'RECEIVED', at, me.name)
+    } else {
+      const counted = wholeNumber(body, 'onHand', 0, 99_999)
+      const change = counted - part.onHand
+      part.onHand = counted
+      if (change !== 0) this.record(part.id, null, change, 'COUNTED', at, me.name)
+    }
+    return { status: 200, body: asPart(part) }
+  }
+
+  /** Sorted by part number, like the server. */
+  private partList(): Part[] {
+    return [...this.state.parts].sort((a, b) => (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0)).map(asPart)
+  }
+
+  addPart(p: Omit<DemoPart, 'id'>, by: string, at: string = this.now().toISOString()): DemoPart {
+    const sku = p.sku.trim().toUpperCase()
+    if (this.state.parts.some((x) => x.sku === sku)) throw new Problem(409, 'Some fields need fixing.', { sku: 'this part number is already in stock' })
+    const part: DemoPart = { ...p, id: ++this.state.seq, sku, name: p.name.trim() }
+    this.state.parts.push(part)
+    if (part.onHand !== 0) this.record(part.id, null, part.onHand, 'COUNTED', at, by)
+    return part
+  }
+
+  private part(id: number): DemoPart {
+    const part = this.state.parts.find((p) => p.id === id)
+    if (!part) throw new Problem(404, `There is no stock part ${id}.`)
+    return part
+  }
+
+  private record(partId: number, jobId: number | null, change: number, reason: Movement['reason'], at: string, by: string | null) {
+    this.state.movements.push({ id: ++this.state.seq, partId, jobId, change, reason, at, by })
+  }
+
+  /** Newest first, at most 50 (as on the server). */
+  private history(partId: number): StockMovement[] {
+    this.part(partId)
+    return this.state.movements
+      .filter((m) => m.partId === partId)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, 50)
+      .map((m) => {
+        const job = m.jobId === null ? undefined : this.state.jobs.find((j) => j.id === m.jobId)
+        return { id: m.id, at: m.at, change: m.change, reason: m.reason, jobId: job ? job.id : null, jobNumber: job ? this.number(job) : null, by: m.by }
+      })
+  }
+
+  /** The quote was just approved: its stock parts come off the shelf, once. May go below zero. */
+  private takeForApproval(job: Job, by: string | null, at: string) {
+    if (this.state.movements.some((m) => m.jobId === job.id && m.reason === 'TAKEN')) return
+    const wanted = new Map<number, number>()
+    for (const l of job.lines) if (l.partId !== null) wanted.set(l.partId, (wanted.get(l.partId) ?? 0) + l.quantity)
+    for (const [partId, quantity] of [...wanted].sort((a, b) => a[0] - b[0])) {
+      const part = this.state.parts.find((p) => p.id === partId)
+      if (!part) continue
+      part.onHand -= quantity
+      this.record(partId, job.id, -quantity, 'TAKEN', at, by)
+    }
   }
 
   // ---- staff ----
@@ -431,7 +545,12 @@ export class DemoBackend {
     const job = this.find(id)
     this.requireMayWorkOn(job, me)
     requireEditable(job)
-    job.lines.push({ id: ++this.state.seq, ...line, description: line.description.trim() })
+    const partId = line.partId ?? null
+    if (partId !== null) {
+      if (line.kind !== 'PART') throw new Problem(409, 'Only a part line can take a part from stock.')
+      this.part(partId)
+    }
+    job.lines.push({ id: ++this.state.seq, kind: line.kind, description: line.description.trim(), quantity: line.quantity, unitPriceSen: line.unitPriceSen, taxable: line.taxable, partId })
     return job
   }
 
@@ -458,6 +577,8 @@ export class DemoBackend {
     }
     job.events.push({ from: job.status, to, at, note: note?.trim() || null, by: 'STAFF' })
     job.status = to
+    // Approved by phone or at the counter: the parts come off the shelf now.
+    if (to === 'APPROVED') this.takeForApproval(job, me.id === 0 ? 'Front desk' : me.name, at)
     // A technician's move on an unassigned job makes it theirs.
     if (me.role === 'TECHNICIAN' && job.assignedTo === null) job.assignedTo = me.id
     return job
@@ -505,8 +626,10 @@ export class DemoBackend {
     if (j.status === 'APPROVED' || j.status === 'DECLINED') throw new Problem(409, `This quote has already been answered (${j.status}).`)
     if (j.status !== 'QUOTED') throw new Problem(409, 'This quote is not waiting for an answer any more.')
     const to: JobStatus = decision === 'APPROVE' ? 'APPROVED' : 'DECLINED'
-    j.events.push({ from: j.status, to, at: this.now().toISOString(), note: note?.trim() || null, by: 'CUSTOMER' })
+    const at = this.now().toISOString()
+    j.events.push({ from: j.status, to, at, note: note?.trim() || null, by: 'CUSTOMER' })
     j.status = to
+    if (to === 'APPROVED') this.takeForApproval(j, null, at)
     return this.publicJob(token)
   }
 
@@ -536,7 +659,12 @@ export class DemoBackend {
       vehicle: { id: v.id, plate: v.plate, make: v.make, model: v.model, year: v.year },
       customer: { id: c.id, name: c.name, phone: c.phone },
       quoteVersion: j.quoteVersion,
-      lines: j.lines.map((l) => ({ ...l, subtotalSen: lineSubtotal(l), taxSen: lineTax(l) })),
+      lines: j.lines.map((l) => ({
+        ...l,
+        subtotalSen: lineSubtotal(l),
+        taxSen: lineTax(l),
+        partSku: l.partId === null ? null : (this.state.parts.find((p) => p.id === l.partId)?.sku ?? null),
+      })),
       ...this.totals(j),
       sstRatePercent: SST_RATE,
       publicToken: j.publicToken,
@@ -631,6 +759,39 @@ function validLine(b: Record<string, unknown>): NewLine {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) fields.quantity = 'must be between 1 and 999'
   const unitPriceSen = Number(b.unitPriceSen)
   if (!Number.isInteger(unitPriceSen) || unitPriceSen < 0 || unitPriceSen > 10_000_000) fields.unitPriceSen = 'must be between 0 and 10000000'
+  const partId = b.partId
+  if (partId !== undefined && partId !== null && (!Number.isInteger(partId) || (partId as number) < 1)) fields.partId = 'must be greater than or equal to 1'
   if (Object.keys(fields).length) throw new Problem(400, 'Some fields need fixing.', fields)
-  return { kind: kind as LineKind, description, quantity, unitPriceSen, taxable: b.taxable === true }
+  return { kind: kind as LineKind, description, quantity, unitPriceSen, taxable: b.taxable === true, ...(typeof partId === 'number' ? { partId } : {}) }
+}
+
+const asPart = (p: DemoPart): Part => ({ ...p, low: p.onHand <= p.reorderLevel })
+
+function wholeNumber(b: Record<string, unknown>, k: string, min: number, max: number): number {
+  const v = b[k]
+  if (typeof v !== 'number' || !Number.isInteger(v)) throw new Problem(400, 'Some fields need fixing.', { [k]: 'must be a whole number' })
+  if (v < min) throw new Problem(400, 'Some fields need fixing.', { [k]: `must be greater than or equal to ${min}` })
+  if (v > max) throw new Problem(400, 'Some fields need fixing.', { [k]: `must be less than or equal to ${max}` })
+  return v
+}
+
+/** The same limits as the server's PartRequest. */
+function validPart(b: Record<string, unknown>): Omit<DemoPart, 'id'> {
+  const fields: Record<string, string> = {}
+  const sku = typeof b.sku === 'string' ? b.sku : ''
+  const name = typeof b.name === 'string' ? b.name : ''
+  if (!sku.trim()) fields.sku = 'must not be blank'
+  else if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,29}$/.test(sku)) fields.sku = '1-30 letters, digits, dots, dashes or slashes'
+  if (!name.trim()) fields.name = 'must not be blank'
+  else if (name.length > 200) fields.name = 'size must be between 0 and 200'
+  const num = (k: string, min: number, max: number) => {
+    const v = b[k]
+    if (typeof v !== 'number' || !Number.isInteger(v)) fields[k] = 'must be a whole number'
+    else if (v < min) fields[k] = `must be greater than or equal to ${min}`
+    else if (v > max) fields[k] = `must be less than or equal to ${max}`
+    return v as number
+  }
+  const out = { sku, name, unitPriceSen: num('unitPriceSen', 0, 10_000_000), onHand: num('onHand', 0, 99_999), reorderLevel: num('reorderLevel', 0, 99_999) }
+  if (Object.keys(fields).length) throw new Problem(400, 'Some fields need fixing.', fields)
+  return out
 }
