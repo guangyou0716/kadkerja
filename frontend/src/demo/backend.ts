@@ -7,7 +7,7 @@
  * It is NOT security: everything lives in the visitor's own browser. The real server does sign-in,
  * CSRF, rate limits and link expiry; here they are skipped or simplified.
  */
-import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, Part, PublicJob, Role, StaffMember, StockMovement } from '../api'
+import type { Actor, Assignee, CheckIn, Decision, JobCard, JobSummary, LineKind, Me, NewLine, Part, Photo, PhotoStage, PublicJob, Role, StaffMember, StockMovement } from '../api'
 import { STATUSES, type JobStatus } from '../status'
 
 /** Published demo sign-ins (same as the server's demo profile). */
@@ -85,13 +85,24 @@ interface Customer {
   phone: string
 }
 
+/** A photo kept in this browser as a data: URL (the server keeps bytes in its database). */
+interface DemoPhoto extends Photo {
+  jobId: number
+  dataUrl: string
+}
+
+/** Photo limits of the browser demo: localStorage holds about 5 MB in all. */
+export const DEMO_PHOTO_MAX_BYTES = 450 * 1024
+export const DEMO_PHOTOS_TOTAL_BYTES = 1536 * 1024
+const MAX_PHOTOS = 12
+
 /** Everything the demo remembers (saved as JSON in localStorage). */
 export interface DemoState {
   /**
-   * 4 added the parts shelf (3 staff management, 2 assignment); older saved demos are thrown away
-   * and seeded again.
+   * 5 added photos (4 the parts shelf, 3 staff management, 2 assignment); older saved demos are
+   * thrown away and seeded again.
    */
-  version: 4
+  version: 5
   seq: number
   signedIn: string | null
   staff: DemoStaff[]
@@ -100,11 +111,14 @@ export interface DemoState {
   jobs: Job[]
   parts: DemoPart[]
   movements: Movement[]
+  photos: DemoPhoto[]
 }
 
 export interface DemoResponse {
   status: number
   body?: unknown
+  /** An image answer, as a data: URL. */
+  image?: string
 }
 
 const NEXT: Record<JobStatus, JobStatus[]> = {
@@ -173,7 +187,7 @@ export class DemoBackend {
   static seeded(now: () => Date = () => new Date()): DemoBackend {
     const b = new DemoBackend(
       {
-        version: 4,
+        version: 5,
         seq: 0,
         signedIn: null,
         staff: DEMO_STAFF.map((s) => ({ ...s, password: DEMO_PASSWORD })),
@@ -182,6 +196,7 @@ export class DemoBackend {
         jobs: [],
         parts: [],
         movements: [],
+        photos: [],
       },
       now,
     )
@@ -263,6 +278,13 @@ export class DemoBackend {
     if (method === 'GET' && path === '/api/auth/csrf') return { status: 200, body: { headerName: 'X-XSRF-TOKEN', token: 'browser-demo' } }
     if (method === 'POST' && path === '/api/auth/login') return { status: 200, body: this.login(String(body.username ?? ''), String(body.password ?? '')) }
 
+    const pm = /^\/api\/public\/jobs\/([^/]+)\/photos\/([^/]+)$/.exec(path)
+    if (pm && method === 'GET') {
+      const job = this.byToken(decodeURIComponent(pm[1]))
+      const photo = this.state.photos.find((p) => p.jobId === job.id && p.publicKey === decodeURIComponent(pm[2]))
+      if (!photo) throw new Problem(404, 'There is no such photo.')
+      return { status: 200, image: photo.dataUrl }
+    }
     let m = /^\/api\/public\/jobs\/([^/]+)(\/answer)?$/.exec(path)
     if (m) {
       const token = decodeURIComponent(m[1])
@@ -298,6 +320,8 @@ export class DemoBackend {
         return { status: 201, body: this.view(this.checkIn(validCheckIn(body))) }
       }
     }
+    const ph = /^\/api\/jobs\/(\d+)\/photos(?:\/(\d+))?$/.exec(path)
+    if (ph) return this.photosRoute(method, Number(ph[1]), ph[2] ? Number(ph[2]) : null, body, me)
     m = /^\/api\/jobs\/(\d+)(?:\/(lines|moves|link|assignee)(?:\/(\d+))?)?$/.exec(path)
     if (m) {
       const id = Number(m[1])
@@ -326,6 +350,74 @@ export class DemoBackend {
       }
     }
     throw new Problem(404, 'Not found.')
+  }
+
+  // ---- photos ----
+
+  private photosRoute(method: string, jobId: number, photoId: number | null, body: Record<string, unknown>, me: Me): DemoResponse {
+    const job = this.find(jobId)
+    const photo = () => {
+      const p = this.state.photos.find((x) => x.jobId === jobId && x.id === photoId)
+      if (!p) throw new Problem(404, `This job card has no photo ${photoId}.`)
+      return p
+    }
+    if (photoId === null && method === 'GET') return { status: 200, body: this.photoList(jobId) }
+    if (photoId !== null && method === 'GET') return { status: 200, image: photo().dataUrl }
+    this.requireMayWorkOn(job, me)
+    if (NEXT[job.status].length === 0) throw new Problem(409, `The photos of a ${job.status} job can no longer be changed.`)
+    if (photoId !== null && method === 'DELETE') {
+      const p = photo()
+      this.state.photos = this.state.photos.filter((x) => x !== p)
+      return { status: 204 }
+    }
+    if (photoId === null && method === 'POST') return { status: 201, body: this.addPhoto(job, body, me) }
+    throw new Problem(404, 'Not found.')
+  }
+
+  private photoList(jobId: number): Photo[] {
+    return this.state.photos.filter((p) => p.jobId === jobId).map(({ jobId: _job, dataUrl: _data, ...info }) => info)
+  }
+
+  /** The server's rules, plus the browser demo's storage limits. body: stage, caption, dataUrl (made by install.ts). */
+  private addPhoto(job: Job, b: Record<string, unknown>, me: Me): Photo {
+    const stage = b.stage
+    if (stage !== 'BEFORE' && stage !== 'AFTER') throw new Problem(400, 'The request could not be read.')
+    const caption = typeof b.caption === 'string' && b.caption.trim() ? b.caption.trim() : null
+    if (typeof b.caption === 'string' && b.caption.length > 200) throw new Problem(400, 'Some fields need fixing.', { caption: 'size must be between 0 and 200' })
+    if (stage === 'AFTER' && job.status !== 'IN_PROGRESS' && job.status !== 'READY') {
+      throw new Problem(409, `After photos can be added once the repair has started (now ${job.status}).`)
+    }
+    if (this.state.photos.filter((p) => p.jobId === job.id).length >= MAX_PHOTOS) {
+      throw new Problem(409, `A job card can have at most ${MAX_PHOTOS} photos. Remove one first.`)
+    }
+    const dataUrl = typeof b.dataUrl === 'string' ? b.dataUrl : ''
+    if (!dataUrl) throw new Problem(400, 'Some fields need fixing.', { file: 'choose a photo' })
+    const bytes = dataUrlBytes(dataUrl)
+    const size = bytes ? imageSize(bytes) : null
+    if (!bytes || !size) throw new Problem(400, 'Some fields need fixing.', { file: 'use a JPEG or PNG photo' })
+    if (bytes.length > DEMO_PHOTO_MAX_BYTES) {
+      throw new Problem(413, 'Some fields need fixing.', { file: 'too big for the browser demo (at most 450 KB after shrinking)' })
+    }
+    const used = this.state.photos.reduce((sum, p) => sum + p.sizeBytes, 0)
+    if (used + bytes.length > DEMO_PHOTOS_TOTAL_BYTES) {
+      throw new Problem(413, 'Some fields need fixing.', { file: "the browser demo's photo space is full; remove a photo or reset the demo" })
+    }
+    const photo: DemoPhoto = {
+      id: ++this.state.seq,
+      jobId: job.id,
+      publicKey: newToken().slice(0, 16),
+      stage: stage as PhotoStage,
+      width: size.width,
+      height: size.height,
+      sizeBytes: bytes.length,
+      caption,
+      at: this.now().toISOString(),
+      by: me.name || 'Front desk',
+      dataUrl,
+    }
+    this.state.photos.push(photo)
+    const { jobId: _job, dataUrl: _data, ...info } = photo
+    return info
   }
 
   // ---- parts shelf ----
@@ -614,6 +706,7 @@ export class DemoBackend {
       sstRatePercent: SST_RATE,
       canAnswer: j.status === 'QUOTED',
       timeline: j.events.map((e) => ({ status: e.to, at: e.at, by: e.by })),
+      photos: this.state.photos.filter((p) => p.jobId === j.id).map((p) => ({ key: p.publicKey, stage: p.stage, caption: p.caption })),
     }
   }
 
@@ -794,4 +887,46 @@ function validPart(b: Record<string, unknown>): Omit<DemoPart, 'id'> {
   const out = { sku, name, unitPriceSen: num('unitPriceSen', 0, 10_000_000), onHand: num('onHand', 0, 99_999), reorderLevel: num('reorderLevel', 0, 99_999) }
   if (Object.keys(fields).length) throw new Problem(400, 'Some fields need fixing.', fields)
   return out
+}
+
+/** The bytes of a base64 data: URL, or null. */
+export function dataUrlBytes(url: string): Uint8Array<ArrayBuffer> | null {
+  const m = /^data:[^;,]*;base64,([A-Za-z0-9+/=]*)$/.exec(url)
+  if (!m) return null
+  try {
+    const raw = atob(m[1])
+    const out = new Uint8Array(raw.length)
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+    return out
+  } catch {
+    return null
+  }
+}
+
+/** Width and height from a PNG or JPEG header; null for anything else (as the server refuses it). */
+export function imageSize(b: Uint8Array): { width: number; height: number } | null {
+  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  if (b.length >= 24 && png.every((v, i) => b[i] === v)) {
+    const view = new DataView(b.buffer, b.byteOffset, b.byteLength)
+    const width = view.getUint32(16)
+    const height = view.getUint32(20)
+    return width > 0 && height > 0 ? { width, height } : null
+  }
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+    let i = 2
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) return null
+      const marker = b[i + 1]
+      const len = (b[i + 2] << 8) | b[i + 3]
+      // SOF0-SOF15 except DHT (C4), JPG (C8) and DAC (CC): the frame header with the size.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        const height = (b[i + 5] << 8) | b[i + 6]
+        const width = (b[i + 7] << 8) | b[i + 8]
+        return width > 0 && height > 0 ? { width, height } : null
+      }
+      if (len < 2) return null
+      i += 2 + len
+    }
+  }
+  return null
 }

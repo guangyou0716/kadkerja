@@ -65,6 +65,21 @@ export interface StockMovement {
   by: string | null
 }
 
+export type PhotoStage = 'BEFORE' | 'AFTER'
+
+/** A photo of a job card (staff view; the image itself is fetched separately). */
+export interface Photo {
+  id: number
+  publicKey: string
+  stage: PhotoStage
+  width: number
+  height: number
+  sizeBytes: number
+  caption: string | null
+  at: string
+  by: string
+}
+
 export interface JobCard {
   id: number
   number: string
@@ -108,6 +123,8 @@ export interface PublicJob {
   sstRatePercent: number
   canAnswer: boolean
   timeline: { status: JobStatus; at: string; by: Actor }[]
+  /** Photos by their random key (no internal ids). */
+  photos: { key: string; stage: PhotoStage; caption: string | null }[]
 }
 
 export interface CheckIn {
@@ -213,6 +230,42 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   throw new ApiError(res.status, body.detail ?? `${res.status} ${res.statusText}`.trim(), body.fields ?? {})
 }
 
+/** A photo upload (multipart: the browser sets the boundary, so no Content-Type here). */
+async function upload<T>(path: string, form: FormData): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      body: form,
+      headers: { Accept: 'application/json', 'X-XSRF-TOKEN': await csrfToken() },
+      credentials: 'same-origin',
+    })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server. Check that it is running.')
+  }
+  if (res.ok) return (await res.json()) as T
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
+  let body: { detail?: string; fields?: Record<string, string> } = {}
+  try {
+    body = await res.json()
+  } catch {
+    // Not problem+json.
+  }
+  throw new ApiError(res.status, body.detail ?? `${res.status} ${res.statusText}`.trim(), body.fields ?? {})
+}
+
+/** An image as a Blob (fetched like the API, so it works with the session and in the browser demo). */
+async function image(path: string): Promise<Blob> {
+  let res: Response
+  try {
+    res = await fetch(path, { credentials: 'same-origin' })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server. Check that it is running.')
+  }
+  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? 'This photo is no longer there.' : `${res.status} ${res.statusText}`.trim())
+  return res.blob()
+}
+
 const post = <T>(path: string, body: unknown) =>
   call<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
@@ -242,6 +295,19 @@ export const api = {
   receivePart: (id: number, quantity: number) => post<Part>(`/api/parts/${id}/receive`, { quantity }),
   countPart: (id: number, onHand: number) => post<Part>(`/api/parts/${id}/count`, { onHand }),
   partHistory: (id: number) => call<StockMovement[]>(`/api/parts/${id}/movements`),
+  photos: (id: number) => call<Photo[]>(`/api/jobs/${id}/photos`),
+  addPhoto: (id: number, stage: PhotoStage, file: Blob, caption?: string) => {
+    const form = new FormData()
+    form.append('stage', stage)
+    form.append('file', file, 'photo.jpg')
+    if (caption?.trim()) form.append('caption', caption.trim())
+    return upload<Photo>(`/api/jobs/${id}/photos`, form)
+  },
+  removePhoto: (id: number, photoId: number) =>
+    call<void>(`/api/jobs/${id}/photos/${photoId}`, { method: 'DELETE' }),
+  image,
+  photoUrl: (id: number, photoId: number) => `/api/jobs/${id}/photos/${photoId}`,
+  publicPhotoUrl: (token: string, key: string) => `/api/public/jobs/${encodeURIComponent(token)}/photos/${encodeURIComponent(key)}`,
   job: (id: number) => call<JobCard>(`/api/jobs/${id}`),
   checkIn: (body: CheckIn) => post<JobCard>('/api/jobs', body),
   addLine: (id: number, line: NewLine) => post<JobCard>(`/api/jobs/${id}/lines`, line),

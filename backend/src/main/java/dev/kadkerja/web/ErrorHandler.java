@@ -57,6 +57,18 @@ public class ErrorHandler extends ResponseEntityExceptionHandler {
         "This was changed at the same time by someone else. Reload and try again.");
   }
 
+  /** A photo over the upload limit (application.properties). */
+  @Override
+  protected ResponseEntity<Object> handleMaxUploadSizeExceededException(
+      org.springframework.web.multipart.MaxUploadSizeExceededException e,
+      HttpHeaders headers,
+      HttpStatusCode status,
+      WebRequest request) {
+    ProblemDetail p = problem(HttpStatus.PAYLOAD_TOO_LARGE, "Check the form", "Some fields need fixing.");
+    p.setProperty("fields", Map.of("file", "this photo is too big (at most 4 MB)"));
+    return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(p);
+  }
+
   @Override
   protected ResponseEntity<Object> handleMethodArgumentNotValid(
       MethodArgumentNotValidException e,

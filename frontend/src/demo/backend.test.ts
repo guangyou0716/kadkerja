@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JobCard, JobSummary, Me, Part, PublicJob, StaffMember, StockMovement } from '../api'
-import { DEMO_PASSWORD, DemoBackend } from './backend'
+import { DEMO_PASSWORD, DEMO_PHOTO_MAX_BYTES, DemoBackend, imageSize } from './backend'
 
 const NOW = new Date('2026-11-27T02:00:00Z')
 
@@ -363,6 +363,97 @@ describe('demo backend: parts shelf', () => {
     expect(b.handle('POST', `/api/parts/${id}/receive`, { quantity: 5 }).status).toBe(403)
     expect(b.handle('POST', '/api/parts', { ...part, sku: 'NEW' }).status).toBe(403)
     expect(onHand(b, 'WIP-14')).toBe(6)
+  })
+})
+
+describe('demo backend: photos', () => {
+  // A 1x1 PNG and a tiny JPEG header (made up, not real photos).
+  const PNG_1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const jpegHeader = (w: number, h: number) =>
+    new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 0xff, w >> 8, w & 0xff, 0x03, 0, 0, 0, 0])
+  const photo = (stage = 'BEFORE', dataUrl = PNG_1x1, caption?: string) => ({ stage, dataUrl, caption })
+  const plateId = (b: DemoBackend, plate: string) => jobs(b).find((j) => j.plate === plate)!.id
+
+  it('reads the size of a PNG or JPEG and nothing else', () => {
+    const png = Uint8Array.from(atob(PNG_1x1.split(',')[1]), (c) => c.charCodeAt(0))
+    expect(imageSize(png)).toEqual({ width: 1, height: 1 })
+    expect(imageSize(jpegHeader(1600, 1200))).toEqual({ width: 1600, height: 1200 })
+    expect(imageSize(new TextEncoder().encode('<svg onload=alert(1)>'))).toBeNull()
+    expect(imageSize(new Uint8Array([0xff, 0xd8, 0xff]))).toBeNull()
+  })
+
+  it('adds, lists, shows and removes a photo; the customer sees it by key only on their own link', () => {
+    const b = signedIn()
+    const id = plateId(b, 'PNG 8810')
+    const added = b.handle('POST', `/api/jobs/${id}/photos`, photo('BEFORE', PNG_1x1, ' Air-con vent '))
+    expect(added.status).toBe(201)
+    expect(added.body).toMatchObject({ stage: 'BEFORE', width: 1, height: 1, caption: 'Air-con vent', by: 'Farah Demo' })
+    const p = added.body as { id: number; publicKey: string }
+    expect(p.publicKey).toMatch(/^[A-Za-z0-9_-]{16}$/)
+    expect(b.handle('GET', `/api/jobs/${id}/photos`, undefined).body).toHaveLength(1)
+    expect(JSON.stringify(b.handle('GET', `/api/jobs/${id}/photos`, undefined).body)).not.toContain('data:')
+    expect(b.handle('GET', `/api/jobs/${id}/photos/${p.id}`, undefined)).toEqual({ status: 200, image: PNG_1x1 })
+    const other = plateId(b, 'PKR 1234')
+    expect(b.handle('GET', `/api/jobs/${other}/photos/${p.id}`, undefined).status).toBe(404)
+
+    const token = card(b, id).publicToken
+    const pub = b.handle('GET', `/api/public/jobs/${token}`, undefined).body as PublicJob
+    expect(pub.photos).toEqual([{ key: p.publicKey, stage: 'BEFORE', caption: 'Air-con vent' }])
+    expect(b.handle('GET', `/api/public/jobs/${token}/photos/${p.publicKey}`, undefined).image).toBe(PNG_1x1)
+    expect(b.handle('GET', `/api/public/jobs/${card(b, other).publicToken}/photos/${p.publicKey}`, undefined).status).toBe(404)
+
+    expect(b.handle('DELETE', `/api/jobs/${id}/photos/${p.id}`, undefined).status).toBe(204)
+    expect(b.handle('GET', `/api/jobs/${id}/photos`, undefined).body).toEqual([])
+  })
+
+  it('follows the server rules: after photos once the repair started, 12 at most, finished jobs locked', () => {
+    const b = signedIn()
+    const inspecting = plateId(b, 'PNG 8810')
+    expect(b.handle('POST', `/api/jobs/${inspecting}/photos`, photo('AFTER'))).toEqual({
+      status: 409,
+      body: { detail: 'After photos can be added once the repair has started (now INSPECTING).' },
+    })
+    const repairing = plateId(b, 'BKE 5021')
+    expect(b.handle('POST', `/api/jobs/${repairing}/photos`, photo('AFTER')).status).toBe(201)
+    for (let i = 1; i < 12; i++) expect(b.handle('POST', `/api/jobs/${repairing}/photos`, photo()).status).toBe(201)
+    expect(b.handle('POST', `/api/jobs/${repairing}/photos`, photo()).body).toEqual({ detail: 'A job card can have at most 12 photos. Remove one first.' })
+    const ready = plateId(b, 'WXY 3388')
+    b.handle('POST', `/api/jobs/${ready}/moves`, { to: 'COLLECTED' })
+    expect(b.handle('POST', `/api/jobs/${ready}/photos`, photo()).status).toBe(409)
+  })
+
+  it('refuses what is not a photo, a long caption, and photos too big for browser storage', () => {
+    const b = signedIn()
+    const id = plateId(b, 'PNG 8810')
+    expect(b.handle('POST', `/api/jobs/${id}/photos`, photo('BEFORE', 'data:image/svg+xml;base64,' + btoa('<svg onload=alert(1)>'))).body).toEqual({
+      detail: 'Some fields need fixing.',
+      fields: { file: 'use a JPEG or PNG photo' },
+    })
+    expect(b.handle('POST', `/api/jobs/${id}/photos`, photo('BEFORE', '')).status).toBe(400)
+    expect(b.handle('POST', `/api/jobs/${id}/photos`, photo('SIDEWAYS')).status).toBe(400)
+    expect(b.handle('POST', `/api/jobs/${id}/photos`, photo('BEFORE', PNG_1x1, 'x'.repeat(201))).status).toBe(400)
+    const big = new Uint8Array(DEMO_PHOTO_MAX_BYTES + 1)
+    big.set(jpegHeader(100, 100))
+    let raw = ''
+    for (const byte of big) raw += String.fromCharCode(byte)
+    const res = b.handle('POST', `/api/jobs/${id}/photos`, photo('BEFORE', 'data:image/jpeg;base64,' + btoa(raw)))
+    expect(res.status).toBe(413)
+    expect(b.handle('GET', `/api/jobs/${id}/photos`, undefined).body).toEqual([])
+  })
+
+  it("a technician cannot add or remove photos on another technician's car", () => {
+    const b = signedIn()
+    const id = plateId(b, 'PJM 77')
+    b.handle('PUT', `/api/jobs/${id}/assignee`, { staffId: null })
+    const p = b.handle('POST', `/api/jobs/${id}/photos`, photo()).body as { id: number }
+    b.handle('POST', '/api/staff', { username: 'tech2', name: 'Other Demo', role: 'TECHNICIAN', password: 'a long password 1' })
+    const other = (b.handle('GET', '/api/staff', undefined).body as StaffMember[]).find((s) => s.username === 'tech2')!
+    b.handle('PUT', `/api/jobs/${id}/assignee`, { staffId: other.id })
+    b.handle('POST', '/api/auth/logout', {})
+    b.handle('POST', '/api/auth/login', { username: 'tech', password: DEMO_PASSWORD })
+    expect(b.handle('POST', `/api/jobs/${id}/photos`, photo()).status).toBe(403)
+    expect(b.handle('DELETE', `/api/jobs/${id}/photos/${p.id}`, undefined).status).toBe(403)
+    expect(b.handle('GET', `/api/jobs/${id}/photos/${p.id}`, undefined).status).toBe(200)
   })
 })
 

@@ -55,5 +55,8 @@ class MigrationTest {
     assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(6);
     assertThat(jdbc.queryForObject("select count(*) from quote_line where part_id is null", Integer.class)).isEqualTo(1);
     assertThat(jdbc.queryForObject("select count(*) from part", Integer.class)).isZero();
+    // V7: old jobs simply have no photos.
+    assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(7);
+    assertThat(jdbc.queryForObject("select count(*) from job_photo", Integer.class)).isZero();
   }
 }

@@ -5,6 +5,8 @@ import { api, ApiError, type Decision, type PublicJob } from '../api'
 import { buttonClass, ErrorNote, inputClass, secondaryButtonClass } from '../components'
 import { formatRm } from '../money'
 import type { JobStatus } from '../status'
+import { PhotoImage } from '../PhotoImage'
+import { PhotoViewer } from '../PhotoViewer'
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString('en-MY', {
@@ -114,6 +116,7 @@ function Progress({ job, token }: { job: PublicJob; token: string }) {
           </ol>
         )}
       </section>
+      {job.photos.length > 0 && <CustomerPhotos job={job} token={token} />}
       {job.quoteVisible && <QuoteCard job={job} token={token} />}
       <section aria-labelledby="history-title" className="rounded-lg bg-white p-4 shadow-sm">
         <h2 id="history-title" className="mb-2 font-semibold text-slate-900">
@@ -241,6 +244,50 @@ function QuoteCard({ job, token }: { job: PublicJob; token: string }) {
             </div>
           )}
         </div>
+      )}
+    </section>
+  )
+}
+
+/** The workshop's before/after photos (fetched by their random key through this link). */
+function CustomerPhotos({ job, token }: { job: PublicJob; token: string }) {
+  const [open, setOpen] = useState<PublicJob['photos'][number] | null>(null)
+  return (
+    <section aria-labelledby="photos-title" className="rounded-lg bg-white p-4 shadow-sm">
+      <h2 id="photos-title" className="mb-2 font-semibold text-slate-900">
+        Photos from the workshop
+      </h2>
+      {(['BEFORE', 'AFTER'] as const).map((stage) => {
+        const group = job.photos.filter((p) => p.stage === stage)
+        if (group.length === 0) return null
+        const label = stage === 'BEFORE' ? 'Before the repair' : 'After the repair'
+        return (
+          <div key={stage} className="mb-2">
+            <h3 className="mb-1 text-sm font-medium text-slate-800">{label}</h3>
+            <ul className="grid grid-cols-3 gap-2" aria-label={label}>
+              {group.map((p, i) => (
+                <li key={p.key}>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(p)}
+                    className="block w-full overflow-hidden rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+                    aria-label={`Open photo ${i + 1}${p.caption ? `: ${p.caption}` : ''}`}
+                  >
+                    <PhotoImage url={api.publicPhotoUrl(token, p.key)} alt="" className="aspect-[4/3] w-full object-cover" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+      {open && (
+        <PhotoViewer
+          url={api.publicPhotoUrl(token, open.key)}
+          title={open.stage === 'BEFORE' ? 'Before the repair' : 'After the repair'}
+          caption={open.caption}
+          onClose={() => setOpen(null)}
+        />
       )}
     </section>
   )
