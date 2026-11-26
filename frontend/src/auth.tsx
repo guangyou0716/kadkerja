@@ -2,10 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { api, ApiError, SIGNED_OUT_EVENT, type Me } from './api'
 import { buttonClass, ErrorNote, Field, inputClass } from './components'
+import { errorText } from './errors'
+import { useI18n } from './i18n/context'
+import { LanguagePicker } from './i18n/LanguagePicker'
 import { MeContext } from './session'
 
 /** Shows the sign-in form until the server knows who this is. */
 export function AuthGate({ children }: { children: (me: Me) => ReactNode }) {
+  const { t } = useI18n()
   const client = useQueryClient()
   const me = useQuery({ queryKey: ['me'], queryFn: api.me, retry: false, staleTime: Infinity })
   useEffect(() => {
@@ -13,15 +17,16 @@ export function AuthGate({ children }: { children: (me: Me) => ReactNode }) {
     window.addEventListener(SIGNED_OUT_EVENT, onSignedOut)
     return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut)
   }, [client])
-  if (me.isPending) return <p className="p-6 text-slate-700">Loading…</p>
+  if (me.isPending) return <p className="p-6 text-slate-700">{t('common.loading')}</p>
   if (me.isError) {
     if (me.error instanceof ApiError && me.error.status === 401) return <SignIn />
-    return <ErrorNote>{me.error.message}</ErrorNote>
+    return <ErrorNote>{errorText(me.error, t)}</ErrorNote>
   }
   return <MeContext.Provider value={me.data}>{children(me.data)}</MeContext.Provider>
 }
 
 function SignIn() {
+  const { t } = useI18n()
   const client = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const login = useMutation({
@@ -30,7 +35,8 @@ function SignIn() {
       client.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' })
       client.setQueryData(['me'], me)
     },
-    onError: (e) => setError(e.message),
+    // The server gives one answer for every wrong sign-in (unknown user, wrong password, disabled account).
+    onError: (e) => setError(e instanceof ApiError && e.status === 401 ? t('signIn.wrong') : errorText(e, t)),
   })
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -41,21 +47,24 @@ function SignIn() {
   return (
     <main className="flex min-h-screen items-start justify-center bg-slate-100 px-4 pt-20">
       <form onSubmit={submit} aria-labelledby="signin-title" className="flex w-full max-w-sm flex-col gap-4 rounded-lg bg-white p-6 shadow-sm">
-        <div>
-          <p className="text-sm font-semibold text-teal-800">kadkerja</p>
-          <h1 id="signin-title" className="text-xl font-bold text-slate-900">
-            Staff sign-in
-          </h1>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-teal-800">kadkerja</p>
+            <h1 id="signin-title" className="text-xl font-bold text-slate-900">
+              {t('signIn.title')}
+            </h1>
+          </div>
+          <LanguagePicker />
         </div>
         {error && <ErrorNote>{error}</ErrorNote>}
-        <Field label="Username">
+        <Field label={t('signIn.username')}>
           {(p) => <input {...p} name="username" autoComplete="username" required className={inputClass} />}
         </Field>
-        <Field label="Password">
+        <Field label={t('signIn.password')}>
           {(p) => <input {...p} name="password" type="password" autoComplete="current-password" required className={inputClass} />}
         </Field>
         <button type="submit" className={buttonClass} disabled={login.isPending}>
-          {login.isPending ? 'Signing in…' : 'Sign in'}
+          {login.isPending ? t('signIn.busy') : t('signIn.submit')}
         </button>
       </form>
     </main>
@@ -63,6 +72,7 @@ function SignIn() {
 }
 
 export function SignOutButton() {
+  const { t } = useI18n()
   const client = useQueryClient()
   const logout = useMutation({
     mutationFn: api.logout,
@@ -79,7 +89,7 @@ export function SignOutButton() {
       onClick={() => logout.mutate()}
       className="whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold text-teal-50 hover:bg-teal-800"
     >
-      Sign out
+      {t('nav.signOut')}
     </button>
   )
 }

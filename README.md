@@ -6,9 +6,10 @@
 the front desk writes down the complaint, the mechanic finds the problem, someone phones the customer with a
 price, and nobody is quite sure which car is waiting for what. kadkerja is a web system for that workshop.
 
-Status: **work in progress** (increments 1-5 of 6: the API, the staff web app, the customer's progress link,
+Status: **work in progress** (increments 1-5 of 6 and most of 6: the API, the staff web app, the customer's progress link,
 staff sign-in with roles, technician assignment, "My jobs", staff management, a parts shelf that is counted down
-when a quote is approved, and before/after photos on each job card). Plan in [Roadmap](#roadmap).
+when a quote is approved, before/after photos on each job card, English / Bahasa Melayu / 简体中文, Docker Compose and
+Playwright end-to-end tests). Plan in [Roadmap](#roadmap).
 
 **Try it: [kadkerja-demo.guangyou.workers.dev](https://kadkerja-demo.guangyou.workers.dev)** (browser-only demo).
 Sign in as `advisor` (service advisor) or `tech` (technician), password `demo-kadkerja`. Open the quoted job
@@ -178,6 +179,34 @@ quote, and taps **Approve** or **Decline** (with an optional reason). No app, no
 <p>
   <img src="docs/job-photos.png" alt="Job card with a before photo opened large: a synthetic picture of a red car with a dent, caption 'Front pads worn to 2 mm', added by Farah Demo, and a Remove photo button" width="560">
   <img src="docs/customer-photos.png" alt="Customer's phone: 'Your quote is ready' for PKR 1234 with a 'Photos from the workshop' section showing the before photo above the quote" width="240">
+</p>
+
+### English, Bahasa Melayu and 简体中文
+
+The staff app and the customer's page come in English, Bahasa Melayu and Simplified Chinese.
+
+- **Picking a language**: a picker on the sign-in page, in the staff header and on the customer's page. The choice
+  is kept in this browser; with no choice yet the app follows the device (any Chinese -> 简体中文, otherwise
+  English). A damaged or unknown saved value is ignored, and a browser that refuses storage still works.
+- **The customer may read another language than the front desk**: next to *Send on WhatsApp* the advisor picks
+  the message language. The WhatsApp text is written in it and its link carries `?lang=ms` / `?lang=zh`, so the
+  page opens in that language (the customer can still switch). *Copy link* stays a plain link.
+- Dates follow the language (`27 Nov, 06:07` / `11月27日 06:07`, always Malaysia time); money is `RM 1,234.50`
+  everywhere; `<html lang>` follows the choice for screen readers and fonts.
+- All texts live in typed catalogues (`frontend/src/i18n`): every language must have every key (the type checks
+  it), tests check the same `{placeholders}` in all three, that no key is unused and that Malay and Chinese are not
+  English copied over. Form field ids come from React, not from the (translated) label.
+- Known limit: the server's own explanations (a refused move, a field check such as "must not be blank") are
+  still in English; the app's own messages, the sign-in error, rate limits, a lost connection and the customer's
+  "quote changed" message are translated.
+
+<p>
+  <img src="docs/lang-board-ms.png" alt="Job board in Bahasa Melayu: menu Papan kerja, Daftar masuk kereta, Kakitangan, Alat ganti; columns Didaftar masuk, Menunggu pelanggan, Di bengkel, Sedia untuk diambil; a language picker set to Bahasa Melayu" width="720">
+</p>
+<p>
+  <img src="docs/lang-customer-zh.png" alt="The customer's page in Simplified Chinese on a phone: 您的报价已准备好, progress 接车 检查 报价 维修 可取车 已取车, quote lines, 小计, SST 8%, 总计 RM 327.24, buttons 批准 and 拒绝, history with dates like 11月27日 06:25" width="240">
+  <img src="docs/lang-sign-in-zh.png" alt="Staff sign-in in Chinese: 员工登录, 用户名, 密码, 登录, with the language picker" width="300">
+  <img src="docs/lang-message-language.png" alt="Customer link panel in Malay: Hantar melalui WhatsApp, Mesej dalam 简体中文, Salin pautan, Pautan baharu" width="300">
 </p>
 
 ### API (Spring Boot)
@@ -356,7 +385,7 @@ docker compose down -v     # stop and delete the data
   technicians only on their own or unassigned cars, 12 at most (also with uploads racing for the last place;
   fails without the version bump), a photo only through its own job, and the customer only by key on their own
   link.
-- Frontend tests (113, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
+- Frontend tests (146, Vitest + Testing Library against a fake `fetch`): board columns and empty/error states;
   check-in request body, per-field server errors with `aria-invalid` and descriptions, refused and unreachable
   server; job card totals, adding a line sends the price in sen, an unreadable price never reaches the server,
   removing a line, moving with a trimmed note, button order, the quote locking after sending, a refused move
@@ -378,8 +407,11 @@ docker compose down -v     # stop and delete the data
   Browser demo: the in-browser stand-in's sign-in, seed totals, the whole check-in -> quote -> customer approval
   flow, the stale-quote and double-answer refusals, technician limits and assignment rules, staff management rules, the parts shelf and its count-down on approval, photos (the same rules as the server, the storage limits, a
   full browser storage refused with nothing changed), form checks, what the customer link hides,
-  new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code).
-- End-to-end tests (Playwright, `frontend/e2e`, 4 tests in a real Chromium against the running stack, each with its
+  new links; the whole app signing in and approving on it, *My jobs*, adding a technician who then signs in; an old or damaged saved demo starts again; reset; and both builds (the real one without demo code). Languages: every key in every catalogue with the same
+  placeholders and none unused, the start language from the link / saved choice / device (damaged saved values and
+  blocked storage included), the sign-in page, board, check-in, job card and customer page in Malay or Chinese, and the
+  WhatsApp message in the language picked for the customer.
+- End-to-end tests (Playwright, `frontend/e2e`, 5 tests in a real Chromium against the running stack, each with its
   own random made-up plate so they can run again on the same database): a car from check-in to collection (the
   advisor writes a quote with a line from stock, uploads a before photo, gives the car to the technician and
   sends the quote; the customer opens the link in a separate phone-sized browser with no cookies, sees the total
@@ -387,7 +419,8 @@ docker compose down -v     # stop and delete the data
   down by one; the technician finds the car in *My jobs*, repairs it and marks it ready; the advisor hands it back
   and the customer's page says collected); a quote redone while the customer's page is open (the old approval
   is refused, the page shows version 2, declining with a reason reaches the staff timeline); a made-up link; a
-  wrong password and sign-out ending the session on the server.
+  wrong password and sign-out ending the session on the server; staff choosing 简体中文 at sign-in and keeping it
+  after a reload, and a WhatsApp message in Malay whose link opens the customer's page in Malay.
 - GitHub Actions on every push and pull request: backend tests on H2 and again on a real PostgreSQL 17 service
   (Flyway migration + API tests), the frontend's lint (oxlint), typecheck, tests and build, and the Docker Compose
   stack built and started, then Playwright end-to-end tests in a real Chromium through nginx to the API and
@@ -402,7 +435,7 @@ docker compose down -v     # stop and delete the data
    management (add, deactivate/reactivate, set and change passwords; sessions end when an account changes).
 5. ✅ Parts stock deducted on approval, before/after photos per job card.
 6. Docker Compose ✅ (PostgreSQL + API + nginx, started and smoke-tested in CI), Playwright end-to-end tests ✅
-   (in CI against that stack); next: Bahasa Melayu and 简体中文, accessibility pass, demo GIF.
+   (in CI against that stack), Bahasa Melayu and 简体中文 ✅; next: accessibility pass, demo GIF.
 
 ## Privacy
 

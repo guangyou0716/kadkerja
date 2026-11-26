@@ -149,6 +149,9 @@ export interface NewLine {
 }
 
 /** An error from the API (RFC 9457 problem+json), with a message per field for a 400. */
+/** api.image's message for a photo that has gone (errorText translates it). */
+export const PHOTO_GONE = 'This photo is no longer there.'
+
 export class ApiError extends Error {
   readonly status: number
   readonly fields: Record<string, string>
@@ -262,7 +265,7 @@ async function image(path: string): Promise<Blob> {
   } catch {
     throw new ApiError(0, 'Cannot reach the server. Check that it is running.')
   }
-  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? 'This photo is no longer there.' : `${res.status} ${res.statusText}`.trim())
+  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? PHOTO_GONE : `${res.status} ${res.statusText}`.trim())
   return res.blob()
 }
 

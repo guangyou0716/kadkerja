@@ -15,8 +15,7 @@ async function start() {
   }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      {banner}
-      <App />
+      <App banner={banner} />
     </StrictMode>,
   )
 }

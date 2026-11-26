@@ -77,7 +77,7 @@ describe('CustomerPage (no login)', () => {
     renderAt(`/t/${TOKEN}`)
     await user.click(await screen.findByRole('button', { name: 'Approve' }))
     await user.click(screen.getByRole('button', { name: 'Yes, approve' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('changed the quote')
+    expect(await screen.findByRole('alert')).toHaveTextContent('The quote has changed or was already answered')
     await waitFor(() => expect(screen.getByTestId('public-total')).toHaveTextContent('RM 300.00'))
     expect(screen.getByText('(version 3)')).toBeInTheDocument()
   })

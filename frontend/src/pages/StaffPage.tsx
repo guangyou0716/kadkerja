@@ -2,28 +2,31 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { api, ApiError, type Role, type StaffMember } from '../api'
 import { buttonClass, ErrorNote, Field, inputClass, secondaryButtonClass } from '../components'
+import { errorText } from '../errors'
+import { useI18n } from '../i18n/context'
+import type { MessageKey } from '../i18n/core'
 import { useMe } from '../session'
 
-const ROLE_LABEL: Record<Role, string> = { ADVISOR: 'Service advisor', TECHNICIAN: 'Technician' }
+const ROLE_KEY: Record<Role, MessageKey> = { ADVISOR: 'role.ADVISOR', TECHNICIAN: 'role.TECHNICIAN' }
 
 /** The service advisor's staff list: add people, deactivate or reactivate them, set a new password. */
 export function StaffPage() {
+  const { t } = useI18n()
   const staff = useQuery({ queryKey: ['staff'], queryFn: api.staff })
   return (
     <section aria-labelledby="staff-title" className="flex max-w-4xl flex-col gap-4">
       <div>
         <h1 id="staff-title" className="text-2xl font-bold text-slate-900">
-          Staff
+          {t('staff.title')}
         </h1>
         <p className="text-sm text-slate-700">
-          People are never deleted, so their name stays on old jobs. A deactivated account cannot sign in, is signed out
-          at once, and its open jobs go back to nobody.
+          {t('staff.intro')}
         </p>
       </div>
       {staff.isPending ? (
-        <p className="text-slate-700">Loading staff…</p>
+        <p className="text-slate-700">{t('staff.loading')}</p>
       ) : staff.isError ? (
-        <ErrorNote>{staff.error.message}</ErrorNote>
+        <ErrorNote>{errorText(staff.error, t)}</ErrorNote>
       ) : (
         <StaffTable staff={staff.data} />
       )}
@@ -33,6 +36,7 @@ export function StaffPage() {
 }
 
 function StaffTable({ staff }: { staff: StaffMember[] }) {
+  const { t } = useI18n()
   const me = useMe()
   const client = useQueryClient()
   const [passwordFor, setPasswordFor] = useState<number | null>(null)
@@ -40,7 +44,7 @@ function StaffTable({ staff }: { staff: StaffMember[] }) {
   const toggle = useMutation({
     mutationFn: (s: StaffMember) => (s.active ? api.deactivateStaff(s.id) : api.activateStaff(s.id)),
     onSuccess: (s) => {
-      setDone(s.active ? `${s.name} can sign in again.` : `${s.name} is deactivated and signed out.`)
+      setDone(t(s.active ? 'staff.reactivated' : 'staff.deactivatedDone', { name: s.name }))
       void client.invalidateQueries({ queryKey: ['staff'] })
       // Their open jobs may have gone back to nobody.
       void client.invalidateQueries({ queryKey: ['jobs'] })
@@ -49,7 +53,7 @@ function StaffTable({ staff }: { staff: StaffMember[] }) {
   })
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm">
-      {toggle.isError && <ErrorNote>{toggle.error.message}</ErrorNote>}
+      {toggle.isError && <ErrorNote>{errorText(toggle.error, t)}</ErrorNote>}
       {done && (
         <p role="status" className="mb-2 text-sm text-teal-900">
           {done}
@@ -59,12 +63,12 @@ function StaffTable({ staff }: { staff: StaffMember[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-slate-700">
-              <th className="py-1 pr-3 font-medium">Name</th>
-              <th className="py-1 pr-3 font-medium">Username</th>
-              <th className="py-1 pr-3 font-medium">Role</th>
-              <th className="py-1 pr-3 font-medium">Status</th>
+              <th className="py-1 pr-3 font-medium">{t('staff.name')}</th>
+              <th className="py-1 pr-3 font-medium">{t('staff.username')}</th>
+              <th className="py-1 pr-3 font-medium">{t('staff.role')}</th>
+              <th className="py-1 pr-3 font-medium">{t('staff.status')}</th>
               <th className="py-1 font-medium">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t('staff.actions')}</span>
               </th>
             </tr>
           </thead>
@@ -76,7 +80,7 @@ function StaffTable({ staff }: { staff: StaffMember[] }) {
                 self={s.username === me.username}
                 busy={toggle.isPending}
                 onToggle={() => {
-                  if (!s.active || window.confirm(`Deactivate ${s.name}? They are signed out at once and cannot sign in.`)) {
+                  if (!s.active || window.confirm(t('staff.deactivateConfirm', { name: s.name }))) {
                     setDone(null)
                     toggle.mutate(s)
                   }
@@ -88,7 +92,7 @@ function StaffTable({ staff }: { staff: StaffMember[] }) {
                 }}
                 onPasswordSet={() => {
                   setPasswordFor(null)
-                  setDone(`New password set for ${s.name}. Their other sessions are signed out.`)
+                  setDone(t('staff.passwordSet', { name: s.name }))
                 }}
               />
             ))}
@@ -108,45 +112,46 @@ function StaffRow(props: {
   onPassword: (open: boolean) => void
   onPasswordSet: () => void
 }) {
+  const { t } = useI18n()
   const { s, self } = props
   return (
     <>
       <tr className="border-b border-slate-100 align-middle">
         <td className="py-2 pr-3 text-slate-900">
           {s.name}
-          {self && <span className="ml-1 text-slate-600">(you)</span>}
+          {self && <span className="ml-1 text-slate-600">{t('common.you')}</span>}
         </td>
         <td className="py-2 pr-3 font-mono text-slate-800">{s.username}</td>
-        <td className="py-2 pr-3 text-slate-800">{ROLE_LABEL[s.role]}</td>
+        <td className="py-2 pr-3 text-slate-800">{t(ROLE_KEY[s.role])}</td>
         <td className="py-2 pr-3">
           <span
             className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${s.active ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-200 text-slate-800'}`}
           >
-            {s.active ? 'Active' : 'Deactivated'}
+            {t(s.active ? 'staff.active' : 'staff.deactivated')}
           </span>
         </td>
         <td className="py-2 text-right whitespace-nowrap">
           {self ? (
-            <span className="text-xs text-slate-600">Use “My password” above</span>
+            <span className="text-xs text-slate-600">{t('staff.useMyPassword')}</span>
           ) : (
             <span className="inline-flex gap-2">
               <button
                 type="button"
                 className={secondaryButtonClass}
-                aria-label={`Set password for ${s.name}`}
+                aria-label={t('staff.setPasswordFor', { name: s.name })}
                 aria-expanded={props.settingPassword}
                 onClick={() => props.onPassword(!props.settingPassword)}
               >
-                Set password
+                {t('staff.setPassword')}
               </button>
               <button
                 type="button"
                 className={secondaryButtonClass}
-                aria-label={`${s.active ? 'Deactivate' : 'Reactivate'} ${s.name}`}
+                aria-label={t(s.active ? 'staff.deactivateName' : 'staff.reactivateName', { name: s.name })}
                 disabled={props.busy}
                 onClick={props.onToggle}
               >
-                {s.active ? 'Deactivate' : 'Reactivate'}
+                {t(s.active ? 'staff.deactivate' : 'staff.reactivate')}
               </button>
             </span>
           )}
@@ -164,11 +169,12 @@ function StaffRow(props: {
 }
 
 function SetPassword({ s, onCancel, onDone }: { s: StaffMember; onCancel: () => void; onDone: () => void }) {
+  const { t } = useI18n()
   const [error, setError] = useState<string | undefined>()
   const save = useMutation({
     mutationFn: (password: string) => api.setStaffPassword(s.id, password),
     onSuccess: onDone,
-    onError: (e) => setError(e instanceof ApiError ? (e.fields.password ?? e.message) : e.message),
+    onError: (e) => setError(e instanceof ApiError && e.fields.password ? e.fields.password : errorText(e, t)),
   })
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -176,30 +182,31 @@ function SetPassword({ s, onCancel, onDone }: { s: StaffMember; onCancel: () => 
     save.mutate(String(new FormData(e.currentTarget).get('password') ?? ''))
   }
   return (
-    <form onSubmit={submit} noValidate aria-label={`Set a password for ${s.name}`} className="flex flex-wrap items-end gap-2">
+    <form onSubmit={submit} noValidate aria-label={t('staff.passwordForm', { name: s.name })} className="flex flex-wrap items-end gap-2">
       <div className="min-w-64 flex-1">
-        <Field label={`New password for ${s.name}`} error={error} hint="At least 12 characters. Tell them in person; they can change it under My password.">
+        <Field label={t('staff.newPasswordFor', { name: s.name })} error={error} hint={t('staff.newPasswordHint')}>
           {(p) => <input {...p} name="password" type="password" autoComplete="new-password" className={`${inputClass} w-full`} />}
         </Field>
       </div>
       <button type="submit" className={buttonClass} disabled={save.isPending}>
-        Save password
+        {t('staff.savePassword')}
       </button>
       <button type="button" className={secondaryButtonClass} onClick={onCancel}>
-        Cancel
+        {t('common.cancel')}
       </button>
     </form>
   )
 }
 
 function AddStaff() {
+  const { t } = useI18n()
   const client = useQueryClient()
   const [fields, setFields] = useState<Record<string, string>>({})
   const [added, setAdded] = useState<string | null>(null)
   const add = useMutation({
     mutationFn: api.addStaff,
     onSuccess: (s) => {
-      setAdded(`${s.name} can now sign in as ${s.username}.`)
+      setAdded(t('staff.added', { name: s.name, username: s.username }))
       void client.invalidateQueries({ queryKey: ['staff'] })
     },
     onError: (e) => setFields(e instanceof ApiError ? e.fields : {}),
@@ -223,36 +230,36 @@ function AddStaff() {
   return (
     <form onSubmit={submit} noValidate aria-labelledby="add-staff-title" className="flex flex-col gap-4 rounded-lg bg-white p-4 shadow-sm">
       <h2 id="add-staff-title" className="font-semibold text-slate-900">
-        Add a member of staff
+        {t('staff.addTitle')}
       </h2>
-      {add.isError && Object.keys(fields).length === 0 && <ErrorNote>{add.error.message}</ErrorNote>}
+      {add.isError && Object.keys(fields).length === 0 && <ErrorNote>{errorText(add.error, t)}</ErrorNote>}
       {added && (
         <p role="status" className="text-sm text-teal-900">
           {added}
         </p>
       )}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Full name" error={fields.name}>
+        <Field label={t('staff.fullName')} error={fields.name}>
           {(p) => <input {...p} name="name" autoComplete="off" className={inputClass} />}
         </Field>
-        <Field label="Username" error={fields.username} hint="3-40 letters, digits, dots, dashes or underscores">
+        <Field label={t('staff.username')} error={fields.username} hint={t('staff.usernameHint')}>
           {(p) => <input {...p} name="username" autoComplete="off" autoCapitalize="none" className={`${inputClass} font-mono`} />}
         </Field>
-        <Field label="Role" error={fields.role}>
+        <Field label={t('staff.role')} error={fields.role}>
           {(p) => (
             <select {...p} name="role" defaultValue="TECHNICIAN" className={inputClass}>
-              <option value="TECHNICIAN">Technician</option>
-              <option value="ADVISOR">Service advisor</option>
+              <option value="TECHNICIAN">{t('role.TECHNICIAN')}</option>
+              <option value="ADVISOR">{t('role.ADVISOR')}</option>
             </select>
           )}
         </Field>
-        <Field label="First password" error={fields.password} hint="At least 12 characters; they can change it under My password">
+        <Field label={t('staff.firstPassword')} error={fields.password} hint={t('staff.firstPasswordHint')}>
           {(p) => <input {...p} name="password" type="password" autoComplete="new-password" className={inputClass} />}
         </Field>
       </div>
       <div>
         <button type="submit" className={buttonClass} disabled={add.isPending}>
-          {add.isPending ? 'Adding…' : 'Add'}
+          {add.isPending ? t('staff.adding') : t('staff.add')}
         </button>
       </div>
     </form>

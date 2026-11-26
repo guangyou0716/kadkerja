@@ -1,3 +1,5 @@
+import type { MessageKey } from './i18n/core'
+
 export const STATUSES = [
   'RECEIVED',
   'INSPECTING',
@@ -12,37 +14,38 @@ export const STATUSES = [
 
 export type JobStatus = (typeof STATUSES)[number]
 
-export const STATUS_LABEL: Record<JobStatus, string> = {
-  RECEIVED: 'Received',
-  INSPECTING: 'Inspecting',
-  QUOTED: 'Waiting for customer',
-  APPROVED: 'Approved',
-  DECLINED: 'Declined',
-  IN_PROGRESS: 'In progress',
-  READY: 'Ready to collect',
-  COLLECTED: 'Collected',
-  CANCELLED: 'Cancelled',
+/** The status as staff read it (see i18n/en.ts for the words). */
+export const STATUS_KEY: Record<JobStatus, MessageKey> = {
+  RECEIVED: 'status.RECEIVED',
+  INSPECTING: 'status.INSPECTING',
+  QUOTED: 'status.QUOTED',
+  APPROVED: 'status.APPROVED',
+  DECLINED: 'status.DECLINED',
+  IN_PROGRESS: 'status.IN_PROGRESS',
+  READY: 'status.READY',
+  COLLECTED: 'status.COLLECTED',
+  CANCELLED: 'status.CANCELLED',
 }
 
-/** What the button that moves a job to this status says. */
-export const MOVE_LABEL: Record<JobStatus, string> = {
-  RECEIVED: 'Received',
-  INSPECTING: 'Start inspection',
-  QUOTED: 'Send quote',
-  APPROVED: 'Customer approved',
-  DECLINED: 'Customer declined',
-  IN_PROGRESS: 'Start repair',
-  READY: 'Ready to collect',
-  COLLECTED: 'Handed back',
-  CANCELLED: 'Cancel job',
+/** What the button that moves a job to this status says (nothing moves a job back to RECEIVED). */
+export const MOVE_KEY: Record<JobStatus, MessageKey> = {
+  RECEIVED: 'status.RECEIVED',
+  INSPECTING: 'move.INSPECTING',
+  QUOTED: 'move.QUOTED',
+  APPROVED: 'move.APPROVED',
+  DECLINED: 'move.DECLINED',
+  IN_PROGRESS: 'move.IN_PROGRESS',
+  READY: 'move.READY',
+  COLLECTED: 'move.COLLECTED',
+  CANCELLED: 'move.CANCELLED',
 }
 
 /** Board columns: the open statuses, in workshop order. */
-export const BOARD_COLUMNS: { title: string; statuses: JobStatus[] }[] = [
-  { title: 'Checked in', statuses: ['RECEIVED', 'INSPECTING'] },
-  { title: 'Waiting for customer', statuses: ['QUOTED'] },
-  { title: 'In the workshop', statuses: ['APPROVED', 'IN_PROGRESS'] },
-  { title: 'Ready to collect', statuses: ['READY', 'DECLINED'] },
+export const BOARD_COLUMNS: { title: MessageKey; statuses: JobStatus[] }[] = [
+  { title: 'column.checkedIn', statuses: ['RECEIVED', 'INSPECTING'] },
+  { title: 'column.waiting', statuses: ['QUOTED'] },
+  { title: 'column.workshop', statuses: ['APPROVED', 'IN_PROGRESS'] },
+  { title: 'column.ready', statuses: ['READY', 'DECLINED'] },
 ]
 
 /** Badge colours with at least 4.5:1 contrast for the text. */
