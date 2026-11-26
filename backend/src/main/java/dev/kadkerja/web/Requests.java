@@ -1,5 +1,6 @@
 package dev.kadkerja.web;
 
+import dev.kadkerja.job.Decision;
 import dev.kadkerja.job.JobStatus;
 import dev.kadkerja.job.LineKind;
 import jakarta.validation.constraints.Max;
@@ -35,4 +36,9 @@ public final class Requests {
       boolean taxable) {}
 
   public record MoveRequest(@NotNull JobStatus to, @Size(max = 500) String note) {}
+
+  public record AnswerRequest(
+      @NotNull Decision decision,
+      @Min(1) int quoteVersion,
+      @Size(max = 300) String note) {}
 }

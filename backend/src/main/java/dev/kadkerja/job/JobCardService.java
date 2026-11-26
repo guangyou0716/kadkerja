@@ -14,18 +14,21 @@ public class JobCardService {
   private final JobCardRepository jobs;
   private final Clock clock;
   private final int sstRatePercent;
+  private final String workshopName;
 
   public JobCardService(
       CustomerRepository customers,
       VehicleRepository vehicles,
       JobCardRepository jobs,
       Clock clock,
-      @Value("${kadkerja.sst-rate-percent:8}") int sstRatePercent) {
+      @Value("${kadkerja.sst-rate-percent:8}") int sstRatePercent,
+      @Value("${kadkerja.workshop-name:Demo Auto Workshop}") String workshopName) {
     this.customers = customers;
     this.vehicles = vehicles;
     this.jobs = jobs;
     this.clock = clock;
     this.sstRatePercent = sstRatePercent;
+    this.workshopName = workshopName;
   }
 
   public int sstRatePercent() {
@@ -121,5 +124,33 @@ public class JobCardService {
     JobCard job = find(id);
     job.moveTo(to, note == null || note.isBlank() ? null : note.trim(), clock.instant());
     return view(jobs.saveAndFlush(job));
+  }
+
+  public JobCardView resetLink(long id) {
+    JobCard job = find(id);
+    job.resetPublicToken();
+    return view(jobs.saveAndFlush(job));
+  }
+
+  /**
+   * The job behind a customer link. Unknown tokens and links that have run out look the same
+   * (not found), so the answer says nothing about which tokens exist.
+   */
+  private JobCard byToken(String token) {
+    return jobs.findByPublicToken(token)
+        .filter(j -> j.linkOpen(clock.instant()))
+        .orElseThrow(() -> new NotFoundException("This link is not valid or has expired."));
+  }
+
+  @Transactional(readOnly = true)
+  public PublicJobView publicView(String token) {
+    return PublicJobView.of(byToken(token), sstRatePercent, workshopName);
+  }
+
+  public PublicJobView answer(String token, Decision decision, int seenVersion, String note) {
+    JobCard job = byToken(token);
+    job.answerQuote(
+        decision, seenVersion, note == null || note.isBlank() ? null : note.trim(), clock.instant());
+    return PublicJobView.of(jobs.saveAndFlush(job), sstRatePercent, workshopName);
   }
 }

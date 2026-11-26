@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router'
 import { Board } from './pages/Board'
 import { CheckInPage } from './pages/CheckInPage'
+import { CustomerPage } from './pages/CustomerPage'
 import { JobPage } from './pages/JobPage'
 
 const nav = ({ isActive }: { isActive: boolean }) =>
@@ -35,13 +36,23 @@ export function Layout() {
   )
 }
 
+/** The customer's page has no staff header or navigation; everything else is the staff app. */
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/t/:token" element={<CustomerPage />} />
+      <Route path="/*" element={<Layout />} />
+    </Routes>
+  )
+}
+
 const client = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000 } } })
 
 export default function App() {
   return (
     <QueryClientProvider client={client}>
       <BrowserRouter>
-        <Layout />
+        <AppRoutes />
       </BrowserRouter>
     </QueryClientProvider>
   )

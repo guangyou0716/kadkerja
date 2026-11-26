@@ -273,11 +273,14 @@ class JobCardApiTest {
   }
 
   @Test
-  void thePublicTokenIsNotInTheStaffListOrDetail() throws Exception {
+  void thePublicTokenIsInTheJobCardForSendingButNeverInTheBoardList() throws Exception {
     long id = checkIn("PNG 5");
+    String token =
+        jdbc.queryForObject("select public_token from job_card where id = ?", String.class, id);
     String list = mvc.perform(get("/api/jobs")).andReturn().getResponse().getContentAsString();
     String one = mvc.perform(get("/api/jobs/" + id)).andReturn().getResponse().getContentAsString();
-    org.assertj.core.api.Assertions.assertThat(list).doesNotContain("token");
-    org.assertj.core.api.Assertions.assertThat(one).doesNotContain("token");
+    // Case-insensitive on the field name and exact on the value, so neither form slips through.
+    org.assertj.core.api.Assertions.assertThat(list).doesNotContainIgnoringCase("token").doesNotContain(token);
+    org.assertj.core.api.Assertions.assertThat((String) JsonPath.read(one, "$.publicToken")).isEqualTo(token);
   }
 }

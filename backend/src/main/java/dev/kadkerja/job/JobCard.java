@@ -16,6 +16,7 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -84,10 +85,58 @@ public class JobCard {
     this.mileageKm = mileageKm;
     this.status = JobStatus.RECEIVED;
     this.createdAt = now;
+    this.publicToken = newToken();
+    events.add(new StatusEvent(this, null, JobStatus.RECEIVED, now, null, Actor.STAFF));
+  }
+
+  /** How long the progress link keeps working after the job is collected or cancelled. */
+  public static final Duration LINK_DAYS_AFTER_FINISH = Duration.ofDays(30);
+
+  /** 18 random bytes (144 bits) as 24 URL-safe characters. */
+  static String newToken() {
     byte[] bytes = new byte[18];
     RANDOM.nextBytes(bytes);
-    this.publicToken = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    events.add(new StatusEvent(this, null, JobStatus.RECEIVED, now, null));
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  }
+
+  /** A new link for the customer; the old one stops working at once (if it was sent to the wrong number, say). */
+  public void resetPublicToken() {
+    publicToken = newToken();
+  }
+
+  /** The link works while the job is open and for a while after it is finished. */
+  public boolean linkOpen(Instant now) {
+    if (!status.finished()) {
+      return true;
+    }
+    Instant finishedAt = events.getLast().getAt();
+    return now.isBefore(finishedAt.plus(LINK_DAYS_AFTER_FINISH));
+  }
+
+  /** The customer sees the quote only once it has been sent, never a draft being edited. */
+  public boolean quoteVisibleToCustomer() {
+    return quoteVersion > 0 && !status.quoteEditable();
+  }
+
+  /**
+   * The customer approves or declines the quote through the link. [seenVersion] is the quote
+   * version their page showed: an answer to a quote that has since been redone is refused, so
+   * nobody approves a price they never saw.
+   */
+  public void answerQuote(Decision decision, int seenVersion, String note, Instant now) {
+    if (seenVersion != quoteVersion) {
+      throw new RuleException(
+          "The workshop changed the quote after you opened it. Check the new quote and answer again.");
+    }
+    if (status == JobStatus.APPROVED || status == JobStatus.DECLINED) {
+      throw new RuleException("This quote has already been answered (" + status + ").");
+    }
+    if (status != JobStatus.QUOTED) {
+      throw new RuleException("This quote is not waiting for an answer any more.");
+    }
+    JobStatus to = decision == Decision.APPROVE ? JobStatus.APPROVED : JobStatus.DECLINED;
+    events.add(new StatusEvent(this, status, to, now, note, Actor.CUSTOMER));
+    status = to;
   }
 
   /** "KK-2026-0042": shown on paper and in messages. */
@@ -131,7 +180,7 @@ public class JobCard {
       }
       quoteVersion++;
     }
-    events.add(new StatusEvent(this, status, to, now, note));
+    events.add(new StatusEvent(this, status, to, now, note, Actor.STAFF));
     status = to;
   }
 

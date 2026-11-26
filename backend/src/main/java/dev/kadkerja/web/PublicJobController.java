@@ -1,0 +1,36 @@
+package dev.kadkerja.web;
+
+import dev.kadkerja.job.JobCardService;
+import dev.kadkerja.job.PublicJobView;
+import dev.kadkerja.web.Requests.AnswerRequest;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * The customer's progress link: no login, the unguessable token is the only key. A token that is
+ * not 24 URL-safe characters never reaches the database (the path does not match: 404).
+ */
+@RestController
+@RequestMapping("/api/public/jobs/{token:[A-Za-z0-9_-]{24}}")
+public class PublicJobController {
+  private final JobCardService service;
+
+  public PublicJobController(JobCardService service) {
+    this.service = service;
+  }
+
+  @GetMapping
+  public PublicJobView get(@PathVariable String token) {
+    return service.publicView(token);
+  }
+
+  @PostMapping("/answer")
+  public PublicJobView answer(@PathVariable String token, @Valid @RequestBody AnswerRequest r) {
+    return service.answer(token, r.decision(), r.quoteVersion(), r.note());
+  }
+}

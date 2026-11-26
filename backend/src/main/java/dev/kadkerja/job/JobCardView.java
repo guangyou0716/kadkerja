@@ -21,6 +21,7 @@ public record JobCardView(
     long taxSen,
     long totalSen,
     int sstRatePercent,
+    String publicToken,
     List<EventView> events) {
 
   public record VehicleView(long id, String plate, String make, String model, Integer year) {}
@@ -37,7 +38,7 @@ public record JobCardView(
       long subtotalSen,
       long taxSen) {}
 
-  public record EventView(JobStatus from, JobStatus to, Instant at, String note) {}
+  public record EventView(JobStatus from, JobStatus to, Instant at, String note, Actor by) {}
 
   public static JobCardView of(JobCard j, int rate) {
     var v = j.getVehicle();
@@ -58,6 +59,7 @@ public record JobCardView(
         j.taxSen(rate),
         j.totalSen(rate),
         rate,
+        j.getPublicToken(),
         j.getEvents().stream().map(JobCardView::event).toList());
   }
 
@@ -74,6 +76,6 @@ public record JobCardView(
   }
 
   private static EventView event(StatusEvent e) {
-    return new EventView(e.getFrom(), e.getTo(), e.getAt(), e.getNote());
+    return new EventView(e.getFrom(), e.getTo(), e.getAt(), e.getNote(), e.getActor());
   }
 }

@@ -39,10 +39,15 @@ public class StatusEvent {
   @Column(length = 500)
   private String note;
 
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 10)
+  private Actor actor;
+
   protected StatusEvent() {}
 
-  StatusEvent(JobCard jobCard, JobStatus from, JobStatus to, Instant at, String note) {
+  StatusEvent(JobCard jobCard, JobStatus from, JobStatus to, Instant at, String note, Actor actor) {
     this.jobCard = jobCard;
+    this.actor = actor;
     this.from = from;
     this.to = to;
     this.at = at;
@@ -63,5 +68,9 @@ public class StatusEvent {
 
   public String getNote() {
     return note;
+  }
+
+  public Actor getActor() {
+    return actor;
   }
 }
